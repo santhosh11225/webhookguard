@@ -50,29 +50,29 @@ export const ToastProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         {toasts.map((toast) => (
           <div
             key={toast.id}
-            className={`pointer-events-auto flex items-start gap-3 p-4 rounded-xl shadow-2xl border transition-all transform translate-y-0 backdrop-blur-md ${
+            className={`pointer-events-auto flex items-start gap-3 p-4 rounded-lg border bg-white shadow-sm text-[#333333] ${
               toast.type === 'success'
-                ? 'bg-emerald-950/90 border-emerald-500/40 text-emerald-100'
+                ? 'border-green-200'
                 : toast.type === 'error'
-                ? 'bg-rose-950/90 border-rose-500/40 text-rose-100'
+                ? 'border-red-200'
                 : toast.type === 'warning'
-                ? 'bg-amber-950/90 border-amber-500/40 text-amber-100'
-                : 'bg-dark-850/95 border-brand-500/40 text-slate-100'
+                ? 'border-amber-200'
+                : 'border-blue-200'
             }`}
           >
             <div className="mt-0.5 shrink-0">
-              {toast.type === 'success' && <CheckCircle2 className="w-5 h-5 text-emerald-400" />}
-              {toast.type === 'error' && <XCircle className="w-5 h-5 text-rose-400" />}
-              {toast.type === 'warning' && <AlertTriangle className="w-5 h-5 text-amber-400" />}
-              {toast.type === 'info' && <Info className="w-5 h-5 text-brand-400" />}
+              {toast.type === 'success' && <CheckCircle2 className="w-5 h-5 text-green-600" />}
+              {toast.type === 'error' && <XCircle className="w-5 h-5 text-red-600" />}
+              {toast.type === 'warning' && <AlertTriangle className="w-5 h-5 text-amber-600" />}
+              {toast.type === 'info' && <Info className="w-5 h-5 text-blue-600" />}
             </div>
             <div className="flex-1 text-sm">
-              <div className="font-semibold">{toast.title}</div>
-              {toast.message && <div className="text-xs mt-0.5 opacity-90 leading-relaxed">{toast.message}</div>}
+              <div className="font-semibold text-[#333333]">{toast.title}</div>
+              {toast.message && <div className="text-xs mt-0.5 text-gray-500 leading-relaxed">{toast.message}</div>}
             </div>
             <button
               onClick={() => removeToast(toast.id)}
-              className="text-slate-400 hover:text-white transition-colors p-1"
+              className="text-gray-400 hover:text-[#333333] transition-colors p-1"
             >
               <X className="w-4 h-4" />
             </button>

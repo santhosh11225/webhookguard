@@ -11,7 +11,6 @@ import { TestSuitesPage } from './pages/TestSuitesPage';
 import { TestRunsPage } from './pages/TestRunsPage';
 import { TestRunDetailPage } from './pages/TestRunDetailPage';
 import { ReportsPage } from './pages/ReportsPage';
-import { MonitoringPage } from './pages/MonitoringPage';
 import { CicdGuidePage } from './pages/CicdGuidePage';
 
 export function App() {
@@ -33,7 +32,7 @@ export function App() {
             <Route path="/runs/:id" element={<TestRunDetailPage />} />
             <Route path="/reports" element={<ReportsPage />} />
             <Route path="/reports/:runId" element={<ReportsPage />} />
-            <Route path="/monitoring" element={<MonitoringPage />} />
+            <Route path="/monitoring" element={<Navigate to="/dashboard" replace />} />
             <Route path="/cicd" element={<CicdGuidePage />} />
           </Route>
 

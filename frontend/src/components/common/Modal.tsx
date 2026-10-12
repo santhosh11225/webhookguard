@@ -49,34 +49,34 @@ export const Modal: React.FC<ModalProps> = ({
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 overflow-y-auto">
       {/* Backdrop */}
       <div
-        className="fixed inset-0 bg-dark-950/80 backdrop-blur-md transition-opacity"
+        className="fixed inset-0 bg-black/30 transition-opacity"
         onClick={onClose}
       />
 
       {/* Dialog Container */}
       <div
-        className={`relative z-10 w-full ${maxWidthClasses[maxWidth]} bg-dark-900 border border-dark-700/80 rounded-2xl shadow-2xl overflow-hidden animate-in fade-in zoom-in-95 duration-150`}
+        className={`relative z-10 w-full ${maxWidthClasses[maxWidth]} bg-white border border-gray-200 rounded-lg shadow-md overflow-hidden`}
       >
         {/* Header */}
-        <div className="flex items-start justify-between p-5 border-b border-dark-700/60 bg-dark-850/60">
+        <div className="flex items-start justify-between p-5 border-b border-gray-200 bg-white">
           <div>
-            <h3 className="text-lg font-semibold text-slate-100">{title}</h3>
-            {subtitle && <p className="text-xs text-slate-400 mt-1">{subtitle}</p>}
+            <h3 className="text-base font-semibold text-[#333333]">{title}</h3>
+            {subtitle && <p className="text-xs text-gray-500 mt-1">{subtitle}</p>}
           </div>
           <button
             onClick={onClose}
-            className="text-slate-400 hover:text-white p-1 rounded-lg hover:bg-dark-700/60 transition-colors"
+            className="text-gray-400 hover:text-gray-700 p-1 rounded hover:bg-gray-100 transition-colors"
           >
             <X className="w-5 h-5" />
           </button>
         </div>
 
         {/* Content */}
-        <div className="p-6 max-h-[75vh] overflow-y-auto">{children}</div>
+        <div className="p-6 max-h-[75vh] overflow-y-auto text-[#333333]">{children}</div>
 
         {/* Footer */}
         {footer && (
-          <div className="flex items-center justify-end gap-3 px-6 py-4 border-t border-dark-700/60 bg-dark-850/40">
+          <div className="flex items-center justify-end gap-3 px-6 py-4 border-t border-gray-200 bg-gray-50">
             {footer}
           </div>
         )}

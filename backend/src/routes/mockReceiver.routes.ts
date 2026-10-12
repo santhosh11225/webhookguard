@@ -6,6 +6,7 @@ export function createMockReceiverRoutes(controller: MockReceiverController): Ro
 
   router.all('/payment', controller.handlePayment.bind(controller));
   router.all('/orders', controller.handleOrder.bind(controller));
+  router.all('/inventory', controller.handleInventory.bind(controller));
   router.get('/health', controller.getHealth.bind(controller));
   router.post('/reset', controller.resetRetries.bind(controller));
 

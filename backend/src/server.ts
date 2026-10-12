@@ -81,6 +81,7 @@ app.get('/', (_req, res) => {
     mockReceiver: {
       payment: '/payment (or /api/mock-webhooks/payment)',
       orders: '/orders (or /api/mock-webhooks/orders)',
+      inventory: '/inventory (or /api/mock-webhooks/inventory)',
       health: '/api/mock-webhooks/health',
     },
   });

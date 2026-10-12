@@ -18,17 +18,17 @@ export const Card: React.FC<CardProps> = ({
   footer,
 }) => {
   return (
-    <div className={`glass-card rounded-xl p-5 ${className}`}>
+    <div className={`bg-white border border-gray-200 rounded-lg p-5 ${className}`}>
       {(title || action) && (
-        <div className="flex items-center justify-between gap-4 mb-4 pb-3 border-b border-dark-700/60">
+        <div className="flex items-center justify-between gap-4 mb-4 pb-3 border-b border-gray-200">
           <div>
             {typeof title === 'string' ? (
-              <h3 className="text-base font-semibold text-slate-100">{title}</h3>
+              <h3 className="text-base font-semibold text-[#333333]">{title}</h3>
             ) : (
               title
             )}
             {subtitle && (
-              <p className="text-xs text-slate-400 mt-0.5 leading-relaxed">{subtitle}</p>
+              <p className="text-xs text-gray-500 mt-0.5 leading-relaxed">{subtitle}</p>
             )}
           </div>
           {action && <div className="shrink-0">{action}</div>}
@@ -36,7 +36,7 @@ export const Card: React.FC<CardProps> = ({
       )}
       <div>{children}</div>
       {footer && (
-        <div className="mt-4 pt-3 border-t border-dark-700/60 text-xs text-slate-400">{footer}</div>
+        <div className="mt-4 pt-3 border-t border-gray-200 text-xs text-gray-500">{footer}</div>
       )}
     </div>
   );

@@ -2,6 +2,9 @@ import { Request, Response } from 'express';
 import { verifyHmacSha256 } from '../utils/hmac.js';
 
 let orderRetryCounter: Record<string, number> = {};
+let paymentRetryCounter: Record<string, number> = {};
+
+export const DEFAULT_MOCK_WEBHOOK_SECRET = 'whsec_test_98af21d09e023190ab78ff09a1';
 
 export class MockReceiverController {
   /**
@@ -12,12 +15,18 @@ export class MockReceiverController {
     // 1. Timeout / Delay Simulation
     let delay = parseInt(req.query.delay as string, 10);
     if (isNaN(delay) || delay <= 0) {
-      if (req.body?.event === 'payment.heavy_processing') {
-        delay = 3000; // Trigger timeout for SLA tests (default timeout is 2000ms)
+      if (req.body?.delay && !isNaN(parseInt(req.body.delay, 10))) {
+        delay = parseInt(req.body.delay, 10);
+      } else if (req.body?.event === 'payment.heavy_processing' || req.body?.event === 'payment.slow') {
+        delay = 3000; // Trigger timeout for SLA tests (default timeout threshold is 2000ms)
       }
     }
     if (delay > 0) {
       await new Promise((resolve) => setTimeout(resolve, delay));
+    }
+
+    if (res.headersSent || res.writableEnded) {
+      return;
     }
 
     // 2. Extract raw body for accurate byte-level cryptographic signature verification
@@ -42,7 +51,7 @@ export class MockReceiverController {
       (req.headers['x-mock-secret'] as string) ||
       process.env.MOCK_WEBHOOK_SECRET ||
       process.env.WEBHOOK_SECRET ||
-      'whsec_test_98af21d09e023190ab78ff09a1';
+      DEFAULT_MOCK_WEBHOOK_SECRET;
 
     // 4. HMAC Verification Logic
     if (isVulnerableMode) {
@@ -125,6 +134,24 @@ export class MockReceiverController {
       return;
     }
 
+    // 6. Transient Retry Simulation for Payment Webhooks
+    if (body.event === 'payment.retry') {
+      const retryKey = body.transaction_id || 'default_payment_retry';
+      const currentAttempt = (paymentRetryCounter[retryKey] || 0) + 1;
+      paymentRetryCounter[retryKey] = currentAttempt;
+
+      if (currentAttempt <= 2) {
+        res.status(503).json({
+          error: 'Service Unavailable',
+          message: `Transient payment gateway unavailable. Attempt ${currentAttempt}/3`,
+          attempt: currentAttempt,
+        });
+        return;
+      }
+
+      delete paymentRetryCounter[retryKey];
+    }
+
     res.status(200).json({
       success: true,
       message: 'Payment webhook received and verified successfully',
@@ -140,35 +167,127 @@ export class MockReceiverController {
    * Fails 2 times with 503, then succeeds on attempt 3
    */
   async handleOrder(req: Request, res: Response): Promise<void> {
-    const delay = parseInt(req.query.delay as string, 10);
-    if (!isNaN(delay) && delay > 0) {
+    let delay = parseInt(req.query.delay as string, 10);
+    if (isNaN(delay) || delay <= 0) {
+      if (req.body?.delay && !isNaN(parseInt(req.body.delay, 10))) {
+        delay = parseInt(req.body.delay, 10);
+      } else if (req.body?.order_id === 'ord_slow_lock' || req.body?.event === 'order.slow') {
+        delay = 3000;
+      }
+    }
+    if (delay > 0) {
       await new Promise((resolve) => setTimeout(resolve, delay));
     }
 
+    if (res.headersSent || res.writableEnded) {
+      return;
+    }
+
     const orderId = req.body?.order_id || 'default_order';
-    const currentCount = (orderRetryCounter[orderId] || 0) + 1;
-    orderRetryCounter[orderId] = currentCount;
+    const isRetryTest =
+      req.query.failTimes !== undefined ||
+      req.body?.event === 'order.retry' ||
+      orderId.includes('retry');
 
-    const failTimes = parseInt(req.query.failTimes as string, 10) || 2;
+    if (isRetryTest) {
+      const currentCount = (orderRetryCounter[orderId] || 0) + 1;
+      orderRetryCounter[orderId] = currentCount;
 
-    if (currentCount <= failTimes) {
-      res.status(503).json({
-        error: 'Service Unavailable',
-        message: `Transient database lock contention. Attempt ${currentCount}/${failTimes + 1}`,
-        attempt: currentCount,
+      const failTimes = parseInt(req.query.failTimes as string, 10) || 2;
+
+      if (currentCount <= failTimes) {
+        res.status(503).json({
+          error: 'Service Unavailable',
+          message: `Transient database lock contention. Attempt ${currentCount}/${failTimes + 1}`,
+          attempt: currentCount,
+        });
+        return;
+      }
+
+      // Reset counter on success
+      delete orderRetryCounter[orderId];
+
+      res.status(200).json({
+        success: true,
+        message: 'Order webhook processed successfully after retry recovery',
+        order_id: orderId,
+        attemptSuccessful: currentCount,
+        timestamp: new Date().toISOString(),
       });
       return;
     }
 
-    // Reset counter on success
-    delete orderRetryCounter[orderId];
+    res.status(200).json({
+      success: true,
+      message: 'Order webhook processed successfully',
+      order_id: orderId,
+      timestamp: new Date().toISOString(),
+    });
+  }
+
+  /**
+   * Mock Inventory Webhook Receiver
+   * Supports API Key authentication (X-API-Key) and schema validation
+   */
+  async handleInventory(req: Request, res: Response): Promise<void> {
+    // 1. Timeout / Delay Simulation
+    let delay = parseInt(req.query.delay as string, 10);
+    if (isNaN(delay) || delay <= 0) {
+      if (req.body?.delay && !isNaN(parseInt(req.body.delay, 10))) {
+        delay = parseInt(req.body.delay, 10);
+      } else if (req.body?.event === 'inventory.slow') {
+        delay = 3000;
+      }
+    }
+    if (delay > 0) {
+      await new Promise((resolve) => setTimeout(resolve, delay));
+    }
+
+    if (res.headersSent || res.writableEnded) {
+      return;
+    }
+
+    // 2. Authentication Check
+    const apiKey =
+      (req.headers['x-api-key'] as string) ||
+      (req.headers['authorization']?.replace(/^ApiKey\s+/i, '')) ||
+      (req.query.apiKey as string);
+
+    const expectedKey = process.env.INVENTORY_API_KEY || 'ak_sec_wh_789123400';
+
+    if (!apiKey || apiKey !== expectedKey) {
+      res.status(401).json({
+        error: 'Unauthorized',
+        message: 'Invalid or missing API key in request header (X-API-Key)',
+      });
+      return;
+    }
+
+    // 3. Schema Validation
+    const body = req.body;
+    if (!body || (typeof body === 'object' && Object.keys(body).length === 0)) {
+      res.status(400).json({
+        error: 'Bad Request',
+        message: 'Webhook payload body cannot be empty',
+      });
+      return;
+    }
+
+    if (!body.sku && !body.item_id) {
+      res.status(400).json({
+        error: 'Bad Request',
+        message: 'Missing required field: sku',
+      });
+      return;
+    }
 
     res.status(200).json({
       success: true,
-      message: 'Order webhook processed successfully after retry recovery',
-      order_id: orderId,
-      attemptSuccessful: currentCount,
-      timestamp: new Date().toISOString(),
+      message: 'Warehouse inventory replenishment received successfully',
+      sku: body.sku || body.item_id,
+      quantity: body.quantity ?? 1,
+      zone: req.headers['x-warehouse-zone'] || 'us-east-1a',
+      receivedAt: new Date().toISOString(),
     });
   }
 
@@ -177,6 +296,7 @@ export class MockReceiverController {
    */
   resetRetries(_req: Request, res: Response): void {
     orderRetryCounter = {};
+    paymentRetryCounter = {};
     res.json({ success: true, message: 'Retry simulation counters reset' });
   }
 
@@ -190,6 +310,7 @@ export class MockReceiverController {
       endpoints: {
         payment: '/payment (or /api/mock-webhooks/payment)',
         orders: '/orders (or /api/mock-webhooks/orders)',
+        inventory: '/inventory (or /api/mock-webhooks/inventory)',
       },
       hmac: {
         algorithm: 'sha256',

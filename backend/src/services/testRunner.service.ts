@@ -15,6 +15,17 @@ import {
 import { generateHmacSha256 } from '../utils/hmac.js';
 import { SqliteEndpointRepository } from '../repositories/sqlite/endpoint.repository.js';
 
+export class SsrfBlockedError extends Error {
+  readonly isSsrfBlocked = true;
+  readonly blockedHostname: string;
+
+  constructor(hostname: string) {
+    super(`SSRF Protection: Access to cloud instance metadata (${hostname}) is strictly prohibited.`);
+    this.name = 'SsrfBlockedError';
+    this.blockedHostname = hostname;
+  }
+}
+
 export class TestRunnerService {
   constructor(
     private endpointRepo: IEndpointRepository,
@@ -142,6 +153,12 @@ export class TestRunnerService {
     let totalElapsed = 0;
     let securityDetails: SecurityFailureDetail | undefined = undefined;
 
+    const expectsTimeout = test.type === 'timeout' || test.expectedStatus === 408;
+    const expectsSsrfBlock =
+      test.type === 'ssrf' ||
+      test.id === 'test-ssrf' ||
+      (test.name?.toLowerCase().includes('ssrf') && test.expectedStatus === 403);
+
     // Prepare Request headers and payload
     const { headers, bodyString } = this.prepareRequestData(endpoint, test);
 
@@ -163,11 +180,23 @@ export class TestRunnerService {
         lastResponse = responseData;
 
         // Status determination
-        const isExpected = responseData.status === test.expectedStatus;
-
-        // Check for Security Failure
-        // If test is invalid HMAC and endpoint returned 200 OK (accepted forged request)
-        if (test.type === 'invalid_hmac' && responseData.status === 200) {
+        if (expectsSsrfBlock) {
+          // Expected SSRF pre-flight block, but request proceeded to network and received a response!
+          finalStatus = 'SECURITY FAILURE';
+          lastError = `Security Violation: Prohibited destination (${endpoint.url}) was accessed over the network instead of being blocked pre-flight. Received HTTP ${responseData.status}.`;
+          securityDetails = {
+            issue: 'SSRF protection failed: Request to restricted cloud metadata endpoint was permitted.',
+            severity: 'critical',
+            expectedBehavior: 'Requests to cloud instance metadata (169.254.169.254) must be blocked pre-flight before opening any network connection.',
+            observedBehavior: `Request proceeded to network and received HTTP ${responseData.status} from ${endpoint.url}.`,
+            remediation:
+              'Ensure URL validation occurs before socket creation and strictly blocks link-local / cloud metadata IP addresses.',
+          };
+        } else if (expectsTimeout) {
+          // Expected a timeout, but endpoint returned an HTTP response
+          finalStatus = 'FAIL';
+          lastError = `Expected request to time out after ${timeoutMs}ms, but received HTTP ${responseData.status} in ${attemptDuration}ms`;
+        } else if (test.type === 'invalid_hmac' && responseData.status === 200) {
           finalStatus = 'SECURITY FAILURE';
           securityDetails = {
             issue: 'Invalid HMAC signature was accepted by the endpoint.',
@@ -186,7 +215,7 @@ export class TestRunnerService {
             observedBehavior: `Endpoint processed unauthenticated request with HTTP ${responseData.status} OK.`,
             remediation: 'Enforce authentication header checks prior to processing webhook payloads.',
           };
-        } else if (isExpected) {
+        } else if (responseData.status === test.expectedStatus) {
           finalStatus = 'PASS';
         } else {
           finalStatus = 'FAIL';
@@ -198,6 +227,7 @@ export class TestRunnerService {
           statusCode: responseData.status,
           responseTimeMs: attemptDuration,
           timestamp: attemptTimestamp,
+          error: lastError,
         });
 
         // If it succeeded or is a critical security vulnerability, do not retry further
@@ -215,22 +245,90 @@ export class TestRunnerService {
       } catch (err: any) {
         const attemptDuration = Math.round(performance.now() - attemptStart);
         totalElapsed += attemptDuration;
-        const isTimeout = err.name === 'AbortError' || err.code === 'ETIMEDOUT' || err.message?.includes('timed out');
-        const attemptStatus = isTimeout ? 'TIMEOUT' : 'ERROR';
+        const isTimeout =
+          err.name === 'AbortError' ||
+          err.name === 'TimeoutError' ||
+          err.code === 'ETIMEDOUT' ||
+          err.message?.includes('timed out') ||
+          err.message?.includes('aborted');
+
+        const isSsrfBlock =
+          err instanceof SsrfBlockedError ||
+          err.name === 'SsrfBlockedError' ||
+          err.isSsrfBlocked === true ||
+          (typeof err.message === 'string' && err.message.startsWith('SSRF Protection:'));
+
         lastError = err.message || 'Request failed';
 
-        attempts.push({
-          attemptNumber: attemptNum,
-          status: attemptStatus,
-          responseTimeMs: attemptDuration,
-          error: lastError,
-          timestamp: attemptTimestamp,
-        });
-
-        if (isTimeout) {
+        if (isSsrfBlock) {
+          if (expectsSsrfBlock) {
+            // Prohibited cloud metadata destination demonstrably blocked before network access -> PASS
+            finalStatus = 'PASS';
+            totalElapsed = 0;
+            attempts.push({
+              attemptNumber: attemptNum,
+              status: 'PASS',
+              responseTimeMs: 0,
+              timestamp: attemptTimestamp,
+              error: lastError,
+            });
+            break; // Pre-flight SSRF block verified, do not retry
+          } else {
+            // Unexpected SSRF block in a non-SSRF test
+            finalStatus = 'ERROR';
+            attempts.push({
+              attemptNumber: attemptNum,
+              status: 'ERROR',
+              responseTimeMs: attemptDuration,
+              error: lastError,
+              timestamp: attemptTimestamp,
+            });
+            break; // Security block is permanent, do not retry
+          }
+        } else if (expectsSsrfBlock) {
+          // Expected SSRF pre-flight block, but request was NOT blocked pre-flight.
+          // It either timed out or produced a network error, meaning connection was attempted!
+          finalStatus = 'FAIL';
+          lastError = isTimeout
+            ? `SSRF Protection Failed: Target was not blocked pre-flight. Request reached network and timed out after ${attemptDuration}ms.`
+            : `SSRF Protection Failed: Target was not blocked pre-flight. Request attempted network connection: ${lastError}`;
+          attempts.push({
+            attemptNumber: attemptNum,
+            status: 'FAIL',
+            responseTimeMs: attemptDuration,
+            error: lastError,
+            timestamp: attemptTimestamp,
+          });
+          break; // Stop immediately
+        } else if (isTimeout && expectsTimeout) {
+          // Expected timeout occurred within intended SLA threshold -> PASS
+          finalStatus = 'PASS';
+          attempts.push({
+            attemptNumber: attemptNum,
+            status: 'PASS',
+            responseTimeMs: attemptDuration,
+            timestamp: attemptTimestamp,
+          });
+          break; // Expected condition satisfied, do not retry
+        } else if (isTimeout) {
+          // Unexpected timeout in a normal HTTP test -> TIMEOUT failure
           finalStatus = 'TIMEOUT';
+          attempts.push({
+            attemptNumber: attemptNum,
+            status: 'TIMEOUT',
+            responseTimeMs: attemptDuration,
+            error: lastError,
+            timestamp: attemptTimestamp,
+          });
         } else {
           finalStatus = 'ERROR';
+          attempts.push({
+            attemptNumber: attemptNum,
+            status: 'ERROR',
+            responseTimeMs: attemptDuration,
+            error: lastError,
+            timestamp: attemptTimestamp,
+          });
         }
       }
 
@@ -309,7 +407,7 @@ export class TestRunnerService {
       hostname === '100.100.100.200';
 
     if (isCloudMetadata) {
-      throw new Error(`SSRF Protection: Access to cloud instance metadata (${hostname}) is strictly prohibited.`);
+      throw new SsrfBlockedError(hostname);
     }
   }
 

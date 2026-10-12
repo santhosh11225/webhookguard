@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { useSearchParams, useNavigate, Link } from 'react-router-dom';
+import { useSearchParams, useNavigate } from 'react-router-dom';
 import {
   Boxes,
   Plus,
@@ -7,20 +7,9 @@ import {
   Edit2,
   Trash2,
   RotateCw,
-  Search,
-  CheckCircle2,
-  AlertTriangle,
-  Clock,
-  Repeat,
-  ShieldAlert,
-  Sliders,
-  ChevronDown,
-  ChevronUp,
-  FileCode,
 } from 'lucide-react';
 import { api } from '../services/api';
 import { TestSuite, Endpoint, TestCase, TestCaseType, TestSuiteCreateInput } from '../types';
-import { Card } from '../components/common/Card';
 import { Button } from '../components/common/Button';
 import { Modal } from '../components/common/Modal';
 import { useToast } from '../context/ToastContext';
@@ -42,7 +31,6 @@ export const TestSuitesPage: React.FC = () => {
     tests: [],
   });
 
-  // Test Case editor inside Suite modal
   const [selectedTestCaseIdx, setSelectedTestCaseIdx] = useState<number | null>(null);
 
   const toast = useToast();
@@ -98,23 +86,23 @@ export const TestSuitesPage: React.FC = () => {
           type: 'valid',
           method: 'POST',
           expectedStatus: 200,
-          payload: { event: 'payment.success', transaction_id: 'txn_auto_001', amount: 1500 },
+          payload: { event: 'payment.success', transaction_id: 'txn_real_1001', amount: 99.5 },
           timeoutMs: 5000,
           retryCount: 1,
         },
         {
           id: 'test-2',
-          name: 'Missing Transaction ID',
+          name: 'Missing Transaction Field Rejection',
           type: 'missing_field',
           method: 'POST',
           expectedStatus: 400,
-          payload: { event: 'payment.success', amount: 1500 },
+          payload: { event: 'payment.success' },
           timeoutMs: 5000,
           retryCount: 1,
         },
         {
           id: 'test-3',
-          name: 'Invalid HMAC Signature Audit',
+          name: 'Cryptographic HMAC Verification Rejection',
           type: 'invalid_hmac',
           method: 'POST',
           expectedStatus: 401,
@@ -127,8 +115,12 @@ export const TestSuitesPage: React.FC = () => {
           name: 'Timeout SLA Condition',
           type: 'timeout',
           method: 'POST',
-          expectedStatus: 200,
-          payload: { event: 'payment.slow' },
+          expectedStatus: 408,
+          payload: {
+            event: 'payment.slow',
+            transaction_id: 'txn_sla_timeout_001',
+            amount: 2500,
+          },
           timeoutMs: 2000,
           retryCount: 1,
         },
@@ -187,8 +179,22 @@ export const TestSuitesPage: React.FC = () => {
       name: `Test: ${type.replace(/_/g, ' ').toUpperCase()}`,
       type,
       method: 'POST',
-      expectedStatus: type === 'valid' ? 200 : type === 'invalid_hmac' || type === 'missing_auth' ? 401 : 400,
-      payload: type === 'valid' ? { event: 'webhook.ping', id: 'ping_123' } : { event: 'incomplete' },
+      expectedStatus:
+        type === 'timeout'
+          ? 408
+          : type === 'ssrf'
+          ? 403
+          : type === 'valid'
+          ? 200
+          : type === 'invalid_hmac' || type === 'missing_auth'
+          ? 401
+          : 400,
+      payload:
+        type === 'timeout'
+          ? { event: 'payment.slow', transaction_id: 'txn_sla_timeout_001', amount: 2500 }
+          : type === 'valid'
+          ? { event: 'webhook.ping', id: 'ping_123' }
+          : { event: 'incomplete' },
       timeoutMs: type === 'timeout' ? 2000 : 5000,
       retryCount: type === 'retry' ? 3 : 1,
       retryDelayMs: 400,
@@ -209,15 +215,15 @@ export const TestSuitesPage: React.FC = () => {
   return (
     <div className="space-y-6">
       {/* Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-2 border-b border-gray-200">
         <div>
-          <h2 className="text-2xl font-bold text-white tracking-tight">Test Suite Builder</h2>
-          <p className="text-xs text-slate-400 mt-1">
+          <h2 className="text-xl font-bold text-[#333333] tracking-tight">Test Suite Builder</h2>
+          <p className="text-xs text-gray-500 mt-0.5">
             Build, configure, and execute automated test suites with real HTTP assertions.
           </p>
         </div>
 
-        <div className="flex items-center gap-3">
+        <div className="flex items-center gap-2.5">
           <Button
             size="sm"
             variant="secondary"
@@ -227,20 +233,20 @@ export const TestSuitesPage: React.FC = () => {
             Refresh
           </Button>
 
-          <Button size="sm" variant="glow" onClick={openCreateModal} icon={<Plus className="w-4 h-4" />}>
+          <Button size="sm" variant="primary" onClick={openCreateModal} icon={<Plus className="w-4 h-4" />}>
             Create Test Suite
           </Button>
         </div>
       </div>
 
       {/* Endpoint Selector Filter */}
-      <div className="glass-panel p-4 rounded-xl flex flex-col sm:flex-row items-center justify-between gap-3">
-        <div className="flex items-center gap-2 text-xs text-slate-300 w-full sm:w-auto">
-          <span className="font-semibold text-slate-400">Filter by Endpoint:</span>
+      <div className="bg-white border border-gray-200 p-4 rounded-lg flex flex-col sm:flex-row items-center justify-between gap-3">
+        <div className="flex items-center gap-2 text-xs text-[#333333] w-full sm:w-auto">
+          <span className="font-semibold text-gray-700">Filter by Endpoint:</span>
           <select
             value={selectedEndpointId}
             onChange={(e) => setSearchParams(e.target.value ? { endpointId: e.target.value } : {})}
-            className="bg-dark-900 border border-dark-700/80 rounded-lg px-3 py-1.5 text-xs text-slate-200 focus:outline-none focus:border-brand-500"
+            className="bg-white border border-gray-200 rounded px-3 py-1.5 text-xs text-[#333333] focus:outline-none focus:border-blue-600"
           >
             <option value="">All Endpoints ({suites.length} Suites)</option>
             {endpoints.map((ep) => (
@@ -251,24 +257,24 @@ export const TestSuitesPage: React.FC = () => {
           </select>
         </div>
 
-        <div className="text-xs text-slate-400">
+        <div className="text-xs text-gray-500">
           Showing {suites.length} test suites
         </div>
       </div>
 
       {/* Suites Grid */}
       {loading ? (
-        <div className="text-center py-12 text-slate-400 text-sm">Loading test suites...</div>
+        <div className="text-center py-12 text-gray-500 text-sm">Loading test suites...</div>
       ) : suites.length === 0 ? (
-        <div className="glass-panel p-12 text-center rounded-2xl space-y-4">
-          <div className="w-12 h-12 rounded-2xl bg-dark-800 flex items-center justify-center mx-auto text-slate-400">
+        <div className="bg-white border border-gray-200 p-12 text-center rounded-lg space-y-4">
+          <div className="w-12 h-12 rounded bg-gray-100 flex items-center justify-center mx-auto text-gray-500">
             <Boxes className="w-6 h-6" />
           </div>
-          <h3 className="text-base font-semibold text-slate-200">No Test Suites Found</h3>
-          <p className="text-xs text-slate-400 max-w-sm mx-auto">
+          <h3 className="text-base font-semibold text-[#333333]">No Test Suites Found</h3>
+          <p className="text-xs text-gray-500 max-w-sm mx-auto">
             Create a test suite to validate payload schemas, HMAC cryptography, timeouts, and retries.
           </p>
-          <Button size="sm" variant="glow" onClick={openCreateModal} icon={<Plus className="w-4 h-4" />}>
+          <Button size="sm" variant="primary" onClick={openCreateModal} icon={<Plus className="w-4 h-4" />}>
             Create Test Suite
           </Button>
         </div>
@@ -279,23 +285,23 @@ export const TestSuitesPage: React.FC = () => {
             const isRunning = runningSuiteId === suite.id;
 
             return (
-              <div key={suite.id} className="glass-card p-5 rounded-xl space-y-4">
+              <div key={suite.id} className="bg-white border border-gray-200 p-5 rounded-lg space-y-4">
                 <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-4">
                   <div>
                     <div className="flex items-center gap-2">
-                      <h3 className="text-base font-bold text-white">{suite.name}</h3>
-                      <span className="text-[11px] font-mono px-2 py-0.5 rounded bg-brand-500/15 text-brand-300 border border-brand-500/30">
+                      <h3 className="text-base font-bold text-[#333333]">{suite.name}</h3>
+                      <span className="text-[11px] font-mono px-2 py-0.5 rounded bg-blue-50 text-blue-700 border border-blue-200">
                         {suite.tests.length} tests
                       </span>
                     </div>
                     {suite.description && (
-                      <p className="text-xs text-slate-400 mt-1">{suite.description}</p>
+                      <p className="text-xs text-gray-500 mt-1">{suite.description}</p>
                     )}
-                    <div className="flex items-center gap-2 mt-2 text-xs font-mono text-slate-400">
+                    <div className="flex items-center gap-2 mt-2 text-xs font-mono text-gray-500">
                       <span>Target Endpoint:</span>
-                      <span className="text-slate-200 font-semibold">{endpoint?.name || suite.endpointId}</span>
+                      <span className="text-[#333333] font-semibold">{endpoint?.name || suite.endpointId}</span>
                       {endpoint && (
-                        <span className="text-slate-500 truncate max-w-md">({endpoint.url})</span>
+                        <span className="text-gray-400 truncate max-w-md">({endpoint.url})</span>
                       )}
                     </div>
                   </div>
@@ -303,7 +309,7 @@ export const TestSuitesPage: React.FC = () => {
                   <div className="flex items-center gap-2 shrink-0">
                     <Button
                       size="sm"
-                      variant="glow"
+                      variant="primary"
                       onClick={() => handleRunSuite(suite)}
                       loading={isRunning}
                       icon={<Play className="w-3.5 h-3.5" />}
@@ -313,7 +319,7 @@ export const TestSuitesPage: React.FC = () => {
 
                     <button
                       onClick={() => openEditModal(suite)}
-                      className="p-2 rounded-lg text-slate-400 hover:text-white hover:bg-dark-700/60 transition-colors"
+                      className="p-2 rounded text-gray-400 hover:text-[#333333] hover:bg-gray-100 transition-colors"
                       title="Edit Suite"
                     >
                       <Edit2 className="w-4 h-4" />
@@ -321,7 +327,7 @@ export const TestSuitesPage: React.FC = () => {
 
                     <button
                       onClick={() => handleDeleteSuite(suite)}
-                      className="p-2 rounded-lg text-slate-400 hover:text-rose-400 hover:bg-rose-950/40 transition-colors"
+                      className="p-2 rounded text-gray-400 hover:text-red-600 hover:bg-red-50 transition-colors"
                       title="Delete Suite"
                     >
                       <Trash2 className="w-4 h-4" />
@@ -330,20 +336,22 @@ export const TestSuitesPage: React.FC = () => {
                 </div>
 
                 {/* Test Cases Overview Badges */}
-                <div className="pt-2 border-t border-dark-700/60">
-                  <div className="text-[11px] uppercase font-bold text-slate-400 tracking-wider mb-2">
+                <div className="pt-2 border-t border-gray-200">
+                  <div className="text-[11px] uppercase font-bold text-gray-500 tracking-wider mb-2">
                     Included Test Scenarios:
                   </div>
                   <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-2">
                     {suite.tests.map((test, idx) => (
                       <div
                         key={idx}
-                        className="p-2.5 rounded-lg bg-dark-900/90 border border-dark-800 text-xs flex flex-col justify-between"
+                        className="p-2.5 rounded bg-gray-50 border border-gray-200 text-xs flex flex-col justify-between"
                       >
-                        <div className="font-semibold text-slate-200 truncate">{test.name}</div>
+                        <div className="font-semibold text-[#333333] truncate">{test.name}</div>
                         <div className="flex items-center justify-between text-[11px] mt-1.5 font-mono">
-                          <span className="text-slate-500 uppercase">{test.type}</span>
-                          <span className="text-emerald-400 font-semibold">Exp: {test.expectedStatus}</span>
+                          <span className="text-gray-500 uppercase">{test.type}</span>
+                          <span className="text-green-700 font-semibold">
+                            Exp: {test.type === 'timeout' || test.expectedStatus === 408 ? 'TIMEOUT' : test.type === 'ssrf' || test.expectedStatus === 403 ? 'BLOCKED (403)' : test.expectedStatus}
+                          </span>
                         </div>
                       </div>
                     ))}
@@ -366,12 +374,12 @@ export const TestSuitesPage: React.FC = () => {
         <form onSubmit={handleSaveSuite} className="space-y-6">
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <div>
-              <label className="block text-xs font-semibold text-slate-300 mb-1">Target Endpoint</label>
+              <label className="block text-xs font-semibold text-[#333333] mb-1">Target Endpoint</label>
               <select
                 value={suiteFormData.endpointId}
                 onChange={(e) => setSuiteFormData({ ...suiteFormData, endpointId: e.target.value })}
                 required
-                className="w-full bg-dark-950 border border-dark-700 rounded-lg px-3 py-2 text-xs text-slate-200 focus:outline-none focus:border-brand-500"
+                className="w-full bg-white border border-gray-200 rounded px-3 py-2 text-xs text-[#333333] focus:outline-none focus:border-blue-600"
               >
                 <option value="" disabled>
                   Select an endpoint...
@@ -385,35 +393,35 @@ export const TestSuitesPage: React.FC = () => {
             </div>
 
             <div>
-              <label className="block text-xs font-semibold text-slate-300 mb-1">Suite Name</label>
+              <label className="block text-xs font-semibold text-[#333333] mb-1">Suite Name</label>
               <input
                 type="text"
                 required
                 placeholder="e.g. Payment Reliability & Security Suite"
                 value={suiteFormData.name}
                 onChange={(e) => setSuiteFormData({ ...suiteFormData, name: e.target.value })}
-                className="w-full bg-dark-950 border border-dark-700 rounded-lg px-3 py-2 text-xs text-slate-200 focus:outline-none focus:border-brand-500"
+                className="w-full bg-white border border-gray-200 rounded px-3 py-2 text-xs text-[#333333] focus:outline-none focus:border-blue-600"
               />
             </div>
           </div>
 
           <div>
-            <label className="block text-xs font-semibold text-slate-300 mb-1">Description</label>
+            <label className="block text-xs font-semibold text-[#333333] mb-1">Description</label>
             <input
               type="text"
               placeholder="Brief summary of what this suite validates"
               value={suiteFormData.description || ''}
               onChange={(e) => setSuiteFormData({ ...suiteFormData, description: e.target.value })}
-              className="w-full bg-dark-950 border border-dark-700 rounded-lg px-3 py-2 text-xs text-slate-200 focus:outline-none focus:border-brand-500"
+              className="w-full bg-white border border-gray-200 rounded px-3 py-2 text-xs text-[#333333] focus:outline-none focus:border-blue-600"
             />
           </div>
 
           {/* Test Case Builder Section */}
-          <div className="space-y-3 pt-2 border-t border-dark-700/60">
+          <div className="space-y-3 pt-2 border-t border-gray-200">
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
               <div>
-                <h4 className="text-sm font-semibold text-slate-100">Test Cases ({suiteFormData.tests.length})</h4>
-                <p className="text-[11px] text-slate-400">Add predefined test scenarios or customize payloads.</p>
+                <h4 className="text-sm font-semibold text-[#333333]">Test Cases ({suiteFormData.tests.length})</h4>
+                <p className="text-[11px] text-gray-500">Add predefined test scenarios or customize payloads.</p>
               </div>
 
               {/* Presets Button Palette */}
@@ -450,7 +458,7 @@ export const TestSuitesPage: React.FC = () => {
                   size="sm"
                   variant="secondary"
                   onClick={() => addPresetTest('invalid_hmac')}
-                  className="text-[11px] py-1 text-purple-300 border-purple-500/30"
+                  className="text-[11px] py-1"
                 >
                   + Invalid HMAC
                 </Button>
@@ -459,7 +467,7 @@ export const TestSuitesPage: React.FC = () => {
                   size="sm"
                   variant="secondary"
                   onClick={() => addPresetTest('timeout')}
-                  className="text-[11px] py-1 text-amber-300 border-amber-500/30"
+                  className="text-[11px] py-1"
                 >
                   + Timeout
                 </Button>
@@ -468,9 +476,18 @@ export const TestSuitesPage: React.FC = () => {
                   size="sm"
                   variant="secondary"
                   onClick={() => addPresetTest('retry')}
-                  className="text-[11px] py-1 text-cyan-300 border-cyan-500/30"
+                  className="text-[11px] py-1"
                 >
                   + Retry
+                </Button>
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="secondary"
+                  onClick={() => addPresetTest('ssrf')}
+                  className="text-[11px] py-1"
+                >
+                  + SSRF Protection
                 </Button>
               </div>
             </div>
@@ -483,16 +500,16 @@ export const TestSuitesPage: React.FC = () => {
                   <div
                     key={test.id || idx}
                     onClick={() => setSelectedTestCaseIdx(idx)}
-                    className={`p-2.5 rounded-lg border text-xs cursor-pointer flex items-center justify-between transition-all ${
+                    className={`p-2.5 rounded border text-xs cursor-pointer flex items-center justify-between transition-colors ${
                       selectedTestCaseIdx === idx
-                        ? 'bg-brand-600/20 border-brand-500/60 text-white'
-                        : 'bg-dark-900 border-dark-800 text-slate-300 hover:bg-dark-800'
+                        ? 'bg-blue-50 border-blue-300 text-blue-700'
+                        : 'bg-white border-gray-200 text-gray-700 hover:bg-gray-50'
                     }`}
                   >
                     <div className="truncate flex-1 pr-2">
                       <div className="font-semibold truncate">{test.name}</div>
                       <div className="text-[10px] opacity-75 font-mono">
-                        {test.type} • Exp: {test.expectedStatus}
+                        {test.type} • Exp: {test.type === 'timeout' || test.expectedStatus === 408 ? 'TIMEOUT' : test.type === 'ssrf' || test.expectedStatus === 403 ? 'BLOCKED (403)' : test.expectedStatus}
                       </div>
                     </div>
                     <button
@@ -501,7 +518,7 @@ export const TestSuitesPage: React.FC = () => {
                         e.stopPropagation();
                         removeTest(idx);
                       }}
-                      className="text-slate-500 hover:text-rose-400 p-1"
+                      className="text-gray-400 hover:text-red-600 p-1"
                     >
                       <Trash2 className="w-3.5 h-3.5" />
                     </button>
@@ -510,7 +527,7 @@ export const TestSuitesPage: React.FC = () => {
               </div>
 
               {/* Right Column: Selected Test Case Editor */}
-              <div className="md:col-span-2 bg-dark-950 p-4 rounded-xl border border-dark-800 space-y-3">
+              <div className="md:col-span-2 bg-gray-50 p-4 rounded-lg border border-gray-200 space-y-3">
                 {selectedTestCaseIdx !== null && suiteFormData.tests[selectedTestCaseIdx] ? (
                   (() => {
                     const test = suiteFormData.tests[selectedTestCaseIdx];
@@ -524,32 +541,32 @@ export const TestSuitesPage: React.FC = () => {
                       <div className="space-y-3 text-xs">
                         <div className="grid grid-cols-2 gap-3">
                           <div>
-                            <label className="block font-semibold text-slate-300 mb-1">Test Name</label>
+                            <label className="block font-semibold text-[#333333] mb-1">Test Name</label>
                             <input
                               type="text"
                               value={test.name}
                               onChange={(e) => updateCurrentTest({ name: e.target.value })}
-                              className="w-full bg-dark-900 border border-dark-700 rounded p-1.5 text-slate-200"
+                              className="w-full bg-white border border-gray-200 rounded p-1.5 text-[#333333]"
                             />
                           </div>
                           <div>
-                            <label className="block font-semibold text-slate-300 mb-1">Expected HTTP Status</label>
+                            <label className="block font-semibold text-[#333333] mb-1">Expected HTTP Status</label>
                             <input
                               type="number"
                               value={test.expectedStatus}
                               onChange={(e) => updateCurrentTest({ expectedStatus: parseInt(e.target.value, 10) || 200 })}
-                              className="w-full bg-dark-900 border border-dark-700 rounded p-1.5 text-slate-200 font-mono"
+                              className="w-full bg-white border border-gray-200 rounded p-1.5 text-[#333333] font-mono"
                             />
                           </div>
                         </div>
 
                         <div className="grid grid-cols-4 gap-2">
                           <div>
-                            <label className="block font-semibold text-slate-300 mb-1">Type</label>
+                            <label className="block font-semibold text-[#333333] mb-1">Type</label>
                             <select
                               value={test.type}
                               onChange={(e) => updateCurrentTest({ type: e.target.value as TestCaseType })}
-                              className="w-full bg-dark-900 border border-dark-700 rounded p-1.5 text-slate-200 font-mono text-xs"
+                              className="w-full bg-white border border-gray-200 rounded p-1.5 text-[#333333] font-mono text-xs"
                             >
                               <option value="valid">Valid Payload</option>
                               <option value="missing_field">Missing Field</option>
@@ -565,11 +582,11 @@ export const TestSuitesPage: React.FC = () => {
                           </div>
 
                           <div>
-                            <label className="block font-semibold text-slate-300 mb-1">Method</label>
+                            <label className="block font-semibold text-[#333333] mb-1">Method</label>
                             <select
                               value={test.method || 'POST'}
                               onChange={(e) => updateCurrentTest({ method: e.target.value as any })}
-                              className="w-full bg-dark-900 border border-dark-700 rounded p-1.5 text-slate-200 font-mono text-xs"
+                              className="w-full bg-white border border-gray-200 rounded p-1.5 text-[#333333] font-mono text-xs"
                             >
                               <option value="POST">POST</option>
                               <option value="GET">GET</option>
@@ -580,34 +597,34 @@ export const TestSuitesPage: React.FC = () => {
                           </div>
 
                           <div>
-                            <label className="block font-semibold text-slate-300 mb-1">Timeout (ms)</label>
+                            <label className="block font-semibold text-[#333333] mb-1">Timeout (ms)</label>
                             <input
                               type="number"
                               value={test.timeoutMs || 5000}
                               onChange={(e) => updateCurrentTest({ timeoutMs: parseInt(e.target.value, 10) || 5000 })}
-                              className="w-full bg-dark-900 border border-dark-700 rounded p-1.5 text-slate-200 font-mono text-xs"
+                              className="w-full bg-white border border-gray-200 rounded p-1.5 text-[#333333] font-mono text-xs"
                             />
                           </div>
 
                           <div>
-                            <label className="block font-semibold text-slate-300 mb-1">Retries</label>
+                            <label className="block font-semibold text-[#333333] mb-1">Retries</label>
                             <input
                               type="number"
                               min={1}
                               max={5}
                               value={test.retryCount || 1}
                               onChange={(e) => updateCurrentTest({ retryCount: parseInt(e.target.value, 10) || 1 })}
-                              className="w-full bg-dark-900 border border-dark-700 rounded p-1.5 text-slate-200 font-mono text-xs"
+                              className="w-full bg-white border border-gray-200 rounded p-1.5 text-[#333333] font-mono text-xs"
                             />
                           </div>
                         </div>
 
                         <div>
                           <div className="flex items-center justify-between mb-1">
-                            <label className="block font-semibold text-slate-300">
+                            <label className="block font-semibold text-[#333333]">
                               Custom Headers (JSON - e.g. custom X-Signature, Auth)
                             </label>
-                            <span className="text-[10px] text-slate-500 font-mono">Optional</span>
+                            <span className="text-[10px] text-gray-500 font-mono">Optional</span>
                           </div>
                           <textarea
                             rows={2}
@@ -625,12 +642,12 @@ export const TestSuitesPage: React.FC = () => {
                                 }
                               }
                             }}
-                            className="w-full bg-dark-900 border border-dark-700 rounded p-1.5 text-slate-200 font-mono text-[11px]"
+                            className="w-full bg-white border border-gray-200 rounded p-1.5 text-[#333333] font-mono text-[11px]"
                           />
                         </div>
 
                         <div>
-                          <label className="block font-semibold text-slate-300 mb-1">
+                          <label className="block font-semibold text-[#333333] mb-1">
                             Payload (JSON or string)
                           </label>
                           <textarea
@@ -648,24 +665,24 @@ export const TestSuitesPage: React.FC = () => {
                                 updateCurrentTest({ payload: e.target.value });
                               }
                             }}
-                            className="w-full bg-dark-900 border border-dark-700 rounded p-2 text-slate-200 font-mono text-[11px]"
+                            className="w-full bg-white border border-gray-200 rounded p-2 text-[#333333] font-mono text-[11px]"
                           />
                         </div>
                       </div>
                     );
                   })()
                 ) : (
-                  <div className="text-center py-10 text-slate-500">Select or add a test case to edit properties.</div>
+                  <div className="text-center py-10 text-gray-500">Select or add a test case to edit properties.</div>
                 )}
               </div>
             </div>
           </div>
 
-          <div className="flex items-center justify-end gap-3 pt-4 border-t border-dark-700/60">
+          <div className="flex items-center justify-end gap-3 pt-4 border-t border-gray-200">
             <Button type="button" variant="ghost" onClick={() => setIsModalOpen(false)}>
               Cancel
             </Button>
-            <Button type="submit" variant="glow">
+            <Button type="submit" variant="primary">
               {editingSuite ? 'Save Changes' : 'Create Suite'}
             </Button>
           </div>

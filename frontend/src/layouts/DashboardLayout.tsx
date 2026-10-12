@@ -5,7 +5,7 @@ import { Navbar } from '../components/layout/Navbar';
 
 export const DashboardLayout: React.FC = () => {
   return (
-    <div className="flex min-h-screen bg-dark-950 text-slate-100 selection:bg-brand-600 selection:text-white">
+    <div className="flex min-h-screen bg-[#F5F5F5] text-[#333333]">
       {/* Sidebar */}
       <Sidebar />
 

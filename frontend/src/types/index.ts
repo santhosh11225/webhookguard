@@ -19,6 +19,7 @@ export type TestCaseType =
   | 'unauthorized'
   | 'timeout'
   | 'retry'
+  | 'ssrf'
   | 'custom';
 
 export interface Endpoint {
