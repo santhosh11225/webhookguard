@@ -75,7 +75,7 @@ jobs:
             exit 1
           fi
 
-      - name: Verify Quality Gate Rejection (Negative Test: HTTP 422 on Vulnerable / Failing Suite)
+      - name: "Verify Quality Gate Rejection (Negative Test: HTTP 422 on Vulnerable / Failing Suite)"
         run: |
           # Fetch test suites and reliably select the intended failing test suite using jq
           SUITES_JSON=$(curl -sf http://localhost:4000/api/test-suites)
