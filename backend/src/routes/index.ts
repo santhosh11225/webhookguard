@@ -28,6 +28,7 @@ import { ReportController } from '../controllers/report.controller.js';
 import { AnalyticsController } from '../controllers/analytics.controller.js';
 import { HealthController } from '../controllers/health.controller.js';
 import { MockReceiverController } from '../controllers/mockReceiver.controller.js';
+import { CicdController } from '../controllers/cicd.controller.js';
 
 import { createEndpointRoutes } from './endpoint.routes.js';
 import { createTestSuiteRoutes } from './testSuite.routes.js';
@@ -37,6 +38,7 @@ import { createReportRoutes } from './report.routes.js';
 import { createAnalyticsRoutes } from './analytics.routes.js';
 import { createHealthRoutes } from './health.routes.js';
 import { createMockReceiverRoutes } from './mockReceiver.routes.js';
+import { createCicdRoutes } from './cicd.routes.js';
 import { seedDatabase } from '../utils/seedData.js';
 import { requireAdminAuth } from '../middleware/auth.js';
 
@@ -82,7 +84,7 @@ export function createApiRouter(): Router {
   const analyticsController = new AnalyticsController(analyticsService);
   const healthController = new HealthController();
   const mockReceiverController = new MockReceiverController();
-
+  const cicdController = new CicdController(suiteRepo, endpointRepo);
 
   // Mount Routes
   router.use('/health', createHealthRoutes(healthController));
@@ -95,6 +97,7 @@ export function createApiRouter(): Router {
   router.use('/test-results', requireAdminAuth, createTestResultRoutes(resultController));
   router.use('/reports', requireAdminAuth, createReportRoutes(reportController));
   router.use('/analytics', requireAdminAuth, createAnalyticsRoutes(analyticsController));
+  router.use('/cicd', requireAdminAuth, createCicdRoutes(cicdController));
 
   // Seed endpoint for manual or frontend trigger (protected)
   router.post('/seed', requireAdminAuth, async (req, res, next) => {

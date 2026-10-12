@@ -178,4 +178,45 @@ export const api = {
   async seedDatabase(): Promise<{ success: boolean; message: string }> {
     return request('/seed', { method: 'POST' });
   },
+
+  // CI/CD GitHub Actions Real Integration
+  async dispatchGitHubAction(suiteId: string, endpointId?: string): Promise<{
+    success: boolean;
+    message: string;
+    suiteId: string;
+    endpointId: string;
+    suiteName: string;
+    repository: string;
+    workflow: string;
+    dispatchedAt: string;
+  }> {
+    return request('/cicd/dispatch', {
+      method: 'POST',
+      body: JSON.stringify({ suiteId, endpointId }),
+    });
+  },
+
+  async getGitHubActionStatus(params?: { suiteId?: string; runId?: number | string; since?: string }): Promise<{
+    success: boolean;
+    found: boolean;
+    status?: string;
+    message?: string;
+    run?: {
+      id: number;
+      name: string;
+      status: 'queued' | 'in_progress' | 'completed';
+      conclusion: 'success' | 'failure' | 'neutral' | 'cancelled' | 'timed_out' | 'action_required' | null;
+      htmlUrl: string;
+      createdAt: string;
+      updatedAt: string;
+      runNumber: number;
+    };
+  }> {
+    const sp = new URLSearchParams();
+    if (params?.suiteId) sp.set('suiteId', params.suiteId);
+    if (params?.runId) sp.set('runId', params.runId.toString());
+    if (params?.since) sp.set('since', params.since);
+    const qs = sp.toString() ? `?${sp.toString()}` : '';
+    return request(`/cicd/status${qs}`);
+  },
 };

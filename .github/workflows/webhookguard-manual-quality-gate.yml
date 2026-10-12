@@ -1,0 +1,153 @@
+name: WebhookGuard Manual Quality Gate
+
+on:
+  workflow_dispatch:
+    inputs:
+      suite_id:
+        description: 'Test Suite ID to execute'
+        required: true
+        type: string
+      endpoint_id:
+        description: 'Target Endpoint ID (optional, mapped automatically if omitted)'
+        required: false
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  manual-quality-gate:
+    name: WebhookGuard Quality Gate Execution
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Resolve Endpoint and Validate Suite
+        id: resolve
+        run: |
+          SUITE_ID="${{ github.event.inputs.suite_id }}"
+          ENDPOINT_ID="${{ github.event.inputs.endpoint_id }}"
+
+          if [ -z "$SUITE_ID" ]; then
+            echo "::error::suite_id input is required."
+            exit 1
+          fi
+
+          if [ -z "$ENDPOINT_ID" ]; then
+            case "$SUITE_ID" in
+              "d9e01a79-a009-4041-9ed4-b8e17f241c60")
+                ENDPOINT_ID="af3554fa-9c02-4941-bd14-4d476517eda5" ;; # CI-CD-PASS-DEMO
+              "aac73296-b27f-4b1b-9e34-f0a65b8192eb")
+                ENDPOINT_ID="af3554fa-9c02-4941-bd14-4d476517eda5" ;; # CI-CD-FAIL-DEMO
+              "34438baa-29ab-43f8-b659-cd0faff6c92a")
+                ENDPOINT_ID="fb75f317-0843-4887-9b49-211dbd38fcd2" ;; # DEMO-BASIC-VALIDATION
+              "faea8190-d80e-45c0-8187-01007281ac61")
+                ENDPOINT_ID="051326d1-f764-456c-8eae-0342d190a127" ;; # DEMO-AUTHENTICATION-SECURITY
+              "fcf5934e-0220-4b47-a3dc-320a916f1791")
+                ENDPOINT_ID="fb75f317-0843-4887-9b49-211dbd38fcd2" ;; # DEMO-HTTP-STATUS-HANDLING
+              "2ec53e3d-f21a-4a63-9ae4-428288c13c63")
+                ENDPOINT_ID="1c071605-ad46-4054-887a-08b0197b3598" ;; # DEMO-RETRY-RESILIENCE
+              "62c675bc-f879-4834-8183-ff15aa893bf6")
+                ENDPOINT_ID="70073933-644e-4660-9e32-57ca0f0632e7" ;; # DEMO-SSRF-SECURITY
+              "1a7d6d60-d391-4dc7-80c8-254a1869b46a")
+                ENDPOINT_ID="fb75f317-0843-4887-9b49-211dbd38fcd2" ;; # DEMO-PAYLOAD-EDGE-CASES
+              "8869dcb6-8d5f-48f2-8710-57a428b94e4c")
+                ENDPOINT_ID="fb75f317-0843-4887-9b49-211dbd38fcd2" ;; # DEMO-WEBHOOK-REGRESSION
+              "cc39aca4-636a-45b3-9f35-38799671a9de")
+                ENDPOINT_ID="6abd6350-238b-497b-b434-9a26265e26f7" ;; # sample t1
+              "7a831d09-47b7-430c-a1d9-60b01211f62b")
+                ENDPOINT_ID="b61cceba-f118-446b-8d90-390bcedaf96c" ;; # sample test 2
+              *)
+                echo "::error::Unauthorized or unrecognized suite ID: $SUITE_ID"
+                exit 1
+                ;;
+            esac
+          fi
+
+          echo "resolved_suite_id=$SUITE_ID" >> $GITHUB_OUTPUT
+          echo "resolved_endpoint_id=$ENDPOINT_ID" >> $GITHUB_OUTPUT
+
+      - name: Execute WebhookGuard Quality Gate
+        env:
+          BASE_URL: ${{ secrets.WEBHOOKGUARD_BASE_URL || vars.WEBHOOKGUARD_BASE_URL || 'https://y09oz1azlf.execute-api.ap-south-1.amazonaws.com' }}
+          ENDPOINT_ID: ${{ steps.resolve.outputs.resolved_endpoint_id }}
+          SUITE_ID: ${{ steps.resolve.outputs.resolved_suite_id }}
+          API_KEY: ${{ secrets.WEBHOOKGUARD_API_KEY }}
+        run: |
+          if [ -z "$API_KEY" ]; then
+            echo "::error::WEBHOOKGUARD_API_KEY secret is required to authenticate with the deployed AWS API Gateway."
+            exit 1
+          fi
+
+          CLEAN_BASE_URL="${BASE_URL%/}"
+          GATE_URL="${CLEAN_BASE_URL}/api/test-runs?failOnErrors=true"
+
+          echo "=========================================================="
+          echo "     WebhookGuard Manual CI/CD Quality Gate Dispatch      "
+          echo "=========================================================="
+          echo "Target Base URL: $CLEAN_BASE_URL"
+          echo "Endpoint ID:     $ENDPOINT_ID"
+          echo "Suite ID:        $SUITE_ID"
+          echo "Fail On Errors:  true"
+          echo "Trigger:         workflow_dispatch"
+          echo "----------------------------------------------------------"
+
+          RESPONSE=$(curl -s -S --max-time 60 -w "\n%{http_code}" -X POST "$GATE_URL" \
+            -H "Content-Type: application/json" \
+            -H "X-API-Key: $API_KEY" \
+            -d "{\"endpointId\": \"$ENDPOINT_ID\", \"suiteId\": \"$SUITE_ID\", \"trigger\": \"workflow_dispatch\"}")
+
+          HTTP_STATUS=$(echo "$RESPONSE" | tail -n1)
+          BODY=$(echo "$RESPONSE" | sed '$d')
+
+          echo "HTTP Response Status: $HTTP_STATUS"
+          echo ""
+
+          if command -v jq > /dev/null 2>&1; then
+            echo "=== Execution Summary ==="
+            echo "$BODY" | jq -r '
+              if .runId then
+                "Run ID:         \(.runId)\n" +
+                "Overall Status: \(.status)\n" +
+                "Total Tests:    \(.total)\n" +
+                "Passed Tests:   \(.passed)\n" +
+                "Failed Tests:   \(.failed)\n" +
+                "Duration:       \(.durationMs) ms\n" +
+                "Started At:     \(.startedAt)\n" +
+                "Completed At:   \(.completedAt)\n" +
+                "----------------------------------------------------------\n" +
+                "Scenario Details:\n" +
+                ((.resultsSummary // []) | map("  [\(.status)] \(.testName) | Expected: \(.expectedStatus) | Actual: \(.actualStatus // "N/A") | Latency: \(.responseTime // 0)ms\(if .error then "\n      Error: " + .error else "" end)") | join("\n"))
+              else
+                "Response: " + (. | tostring)
+              end
+            '
+          else
+            echo "$BODY"
+          fi
+
+          echo "----------------------------------------------------------"
+
+          if [ "$HTTP_STATUS" = "201" ]; then
+            RUN_STATUS=$(echo "$BODY" | jq -r '.status // empty' 2>/dev/null || echo "")
+            FAILED_COUNT=$(echo "$BODY" | jq -r '.failed // 0' 2>/dev/null || echo "0")
+            if [ "$RUN_STATUS" = "passed" ] && [ "$FAILED_COUNT" = "0" ]; then
+              echo "::notice::WebhookGuard Manual Quality Gate Passed: 100% of webhook test scenarios succeeded (HTTP 201 Created)."
+              exit 0
+            else
+              echo "::error::WebhookGuard Quality Gate reported incomplete or failing scenarios despite HTTP 201."
+              exit 1
+            fi
+          elif [ "$HTTP_STATUS" = "422" ]; then
+            echo "::error::WebhookGuard Quality Gate Blocked Pipeline: One or more webhook tests failed (HTTP 422 Unprocessable Entity)."
+            exit 1
+          elif [ "$HTTP_STATUS" = "401" ]; then
+            echo "::error::WebhookGuard Quality Gate Authentication Failed (HTTP 401 Unauthorized). Verify WEBHOOKGUARD_API_KEY secret."
+            exit 1
+          elif [ "$HTTP_STATUS" = "400" ]; then
+            echo "::error::WebhookGuard Quality Gate Bad Request (HTTP 400). Verify endpointId and suiteId."
+            exit 1
+          else
+            echo "::error::WebhookGuard Quality Gate Failed: Unexpected HTTP status $HTTP_STATUS from API Gateway."
+            exit 1
+          fi
