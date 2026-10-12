@@ -24,9 +24,12 @@ jobs:
     steps:
       - name: Resolve Endpoint and Validate Suite
         id: resolve
+        env:
+          INPUT_SUITE_ID: ${{ github.event.inputs.suite_id }}
+          INPUT_ENDPOINT_ID: ${{ github.event.inputs.endpoint_id }}
         run: |
-          SUITE_ID="${{ github.event.inputs.suite_id }}"
-          ENDPOINT_ID="${{ github.event.inputs.endpoint_id }}"
+          SUITE_ID="$INPUT_SUITE_ID"
+          ENDPOINT_ID="$INPUT_ENDPOINT_ID"
 
           if [ -z "$SUITE_ID" ]; then
             echo "::error::suite_id input is required."

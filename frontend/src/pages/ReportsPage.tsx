@@ -40,7 +40,7 @@ export const ReportsPage: React.FC = () => {
       .then((data) => setReport(data))
       .catch((err) => toast.error('Failed to load report', err.message))
       .finally(() => setLoading(false));
-  }, [selectedRunId]);
+  }, [selectedRunId, toast]);
 
   const handlePrint = () => {
     window.print();

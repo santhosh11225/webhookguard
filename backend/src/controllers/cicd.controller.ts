@@ -268,6 +268,14 @@ export class CicdController {
         );
         if (recentRun) {
           matchedRun = recentRun;
+        } else {
+          res.json({
+            success: true,
+            found: false,
+            status: 'queued',
+            message: 'Workflow run queued on GitHub; waiting for runner initialization...',
+          });
+          return;
         }
       }
 

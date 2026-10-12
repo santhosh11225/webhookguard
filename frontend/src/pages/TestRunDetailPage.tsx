@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { useParams, Link, useNavigate } from 'react-router-dom';
 import {
   Play,
@@ -34,7 +34,7 @@ export const TestRunDetailPage: React.FC = () => {
   const toast = useToast();
   const navigate = useNavigate();
 
-  const loadRunDetails = async () => {
+  const loadRunDetails = useCallback(async () => {
     if (!id) return;
     try {
       setLoading(true);
@@ -62,11 +62,11 @@ export const TestRunDetailPage: React.FC = () => {
     } finally {
       setLoading(false);
     }
-  };
+  }, [id, toast]);
 
   useEffect(() => {
     loadRunDetails();
-  }, [id]);
+  }, [loadRunDetails]);
 
   const handleRerun = async () => {
     if (!run) return;

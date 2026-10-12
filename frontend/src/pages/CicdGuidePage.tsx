@@ -270,15 +270,15 @@ jobs:
           SUITE_ID: \${{ github.event.inputs.suite_id }}
           API_KEY: \${{ secrets.WEBHOOKGUARD_API_KEY }}
         run: |
-          RESPONSE=\$(curl -s -S --max-time 60 -w "\\n%{http_code}" -X POST \\
-            "\$BASE_URL/api/test-runs?failOnErrors=true" \\
+          RESPONSE=$(curl -s -S --max-time 60 -w "\\n%{http_code}" -X POST \\
+            "$BASE_URL/api/test-runs?failOnErrors=true" \\
             -H "Content-Type: application/json" \\
-            -H "X-API-Key: \$API_KEY" \\
-            -d "{\\"endpointId\\": \\"\$ENDPOINT_ID\\", \\"suiteId\\": \\"\$SUITE_ID\\", \\"trigger\\": \\"workflow_dispatch\\"}")
+            -H "X-API-Key: $API_KEY" \\
+            -d "{\\"endpointId\\": \\"$ENDPOINT_ID\\", \\"suiteId\\": \\"$SUITE_ID\\", \\"trigger\\": \\"workflow_dispatch\\"}")
 
-          HTTP_STATUS=\$(echo "\$RESPONSE" | tail -n1)
-          if [ "\$HTTP_STATUS" != "201" ]; then
-            echo "::error::WebhookGuard Quality Gate Blocked Pipeline (HTTP \$HTTP_STATUS)"
+          HTTP_STATUS=$(echo "$RESPONSE" | tail -n1)
+          if [ "$HTTP_STATUS" != "201" ]; then
+            echo "::error::WebhookGuard Quality Gate Blocked Pipeline (HTTP $HTTP_STATUS)"
             exit 1
           fi`;
 
@@ -358,6 +358,21 @@ jobs:
               ))}
             </select>
           </div>
+        </div>
+
+        {/* Quality Gate Mode Toggle */}
+        <div className="flex items-center gap-2 pt-1 text-xs text-gray-700">
+          <input
+            type="checkbox"
+            id="failOnErrorsToggle"
+            checked={failOnErrors}
+            onChange={(e) => setFailOnErrors(e.target.checked)}
+            disabled={isActionBusy}
+            className="rounded border-gray-300 text-blue-600 focus:ring-blue-500 cursor-pointer"
+          />
+          <label htmlFor="failOnErrorsToggle" className="cursor-pointer select-none">
+            Enforce Quality Gate on Simulation (<code className="bg-gray-100 px-1 py-0.5 rounded font-mono">failOnErrors=true</code>: returns <span className="font-semibold text-red-600">HTTP 422</span> on any failed assertion)
+          </label>
         </div>
 
         {/* Action Buttons */}

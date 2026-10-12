@@ -217,4 +217,84 @@ describe('GitHub Actions CI/CD Integration API Endpoint Tests', () => {
     assert.equal(body.run.conclusion, 'success');
     assert.equal(body.run.htmlUrl, 'https://github.com/santhosh11225/webhookguard/actions/runs/99887766');
   });
+
+  // 7. Status retrieval with since parameter
+  it('returns found: false when only older historical runs exist for a recent since timestamp', async () => {
+    process.env.GITHUB_ACTIONS_TOKEN = 'ghp_valid_mock_token_12345';
+
+    globalThis.fetch = async (input: any, init?: any): Promise<Response> => {
+      const urlStr = input.toString();
+      if (urlStr.includes('api.github.com/repos/')) {
+        return new Response(
+          JSON.stringify({
+            workflow_runs: [
+              {
+                id: 11111,
+                name: 'WebhookGuard Quality Gate Execution',
+                status: 'completed',
+                conclusion: 'success',
+                html_url: 'https://github.com/santhosh11225/webhookguard/actions/runs/11111',
+                created_at: '2026-10-12T12:00:00Z', // hours earlier
+                updated_at: '2026-10-12T12:00:45Z',
+                run_number: 10,
+              },
+            ],
+          }),
+          { status: 200, headers: { 'Content-Type': 'application/json' } }
+        );
+      }
+      return originalFetch(input, init);
+    };
+
+    const res = await fetch(`${baseUrl}/cicd/status?since=2026-10-12T18:00:00Z`, {
+      headers: {
+        'X-API-Key': TEST_ADMIN_KEY,
+      },
+    });
+
+    assert.equal(res.status, 200);
+    const body = (await res.json()) as any;
+    assert.equal(body.success, true);
+    assert.equal(body.found, false);
+    assert.equal(body.status, 'queued');
+  });
+
+  // 8. Direct runId lookup
+  it('fetches specific run directly when runId query param is supplied', async () => {
+    process.env.GITHUB_ACTIONS_TOKEN = 'ghp_valid_mock_token_12345';
+
+    globalThis.fetch = async (input: any, init?: any): Promise<Response> => {
+      const urlStr = input.toString();
+      if (urlStr.includes('/actions/runs/554433')) {
+        return new Response(
+          JSON.stringify({
+            id: 554433,
+            name: 'WebhookGuard Quality Gate Execution',
+            status: 'in_progress',
+            conclusion: null,
+            html_url: 'https://github.com/santhosh11225/webhookguard/actions/runs/554433',
+            created_at: '2026-10-12T18:35:00Z',
+            updated_at: '2026-10-12T18:35:10Z',
+            run_number: 45,
+          }),
+          { status: 200, headers: { 'Content-Type': 'application/json' } }
+        );
+      }
+      return originalFetch(input, init);
+    };
+
+    const res = await fetch(`${baseUrl}/cicd/status?runId=554433`, {
+      headers: {
+        'X-API-Key': TEST_ADMIN_KEY,
+      },
+    });
+
+    assert.equal(res.status, 200);
+    const body = (await res.json()) as any;
+    assert.equal(body.success, true);
+    assert.equal(body.found, true);
+    assert.equal(body.run.id, 554433);
+    assert.equal(body.run.status, 'in_progress');
+    assert.equal(body.run.conclusion, null);
+  });
 });

@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { useSearchParams, useNavigate } from 'react-router-dom';
 import {
   Boxes,
@@ -36,7 +36,7 @@ export const TestSuitesPage: React.FC = () => {
   const toast = useToast();
   const navigate = useNavigate();
 
-  const loadData = async () => {
+  const loadData = useCallback(async () => {
     try {
       setLoading(true);
       const [eps, suList] = await Promise.all([
@@ -50,11 +50,11 @@ export const TestSuitesPage: React.FC = () => {
     } finally {
       setLoading(false);
     }
-  };
+  }, [selectedEndpointId, toast]);
 
   useEffect(() => {
     loadData();
-  }, [selectedEndpointId]);
+  }, [loadData]);
 
   const handleRunSuite = async (suite: TestSuite) => {
     try {

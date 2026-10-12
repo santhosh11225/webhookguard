@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import {
   PlayCircle,
@@ -22,7 +22,7 @@ export const TestRunsPage: React.FC = () => {
 
   const toast = useToast();
 
-  const loadRuns = async () => {
+  const loadRuns = useCallback(async () => {
     try {
       setLoading(true);
       const list = await api.getTestRuns({ endpointId: endpointId || undefined });
@@ -32,11 +32,11 @@ export const TestRunsPage: React.FC = () => {
     } finally {
       setLoading(false);
     }
-  };
+  }, [endpointId, toast]);
 
   useEffect(() => {
     loadRuns();
-  }, [endpointId]);
+  }, [loadRuns]);
 
   const filtered = runs.filter(
     (r) =>

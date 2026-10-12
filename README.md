@@ -200,10 +200,27 @@ WebhookGuard implements authentic cryptographic signature generation and verific
 
 ## 9. CI/CD Quality Gate & GitHub Actions
 
-### Quality Gate Endpoint
+WebhookGuard provides two complementary CI/CD integration models:
+
+### Model A: Automated Push/PR Quality Gate
+The automated pipeline is defined in `.github/workflows/webhookguard-ci.yml`. It runs automatically on pushes and pull requests to `master` / `main`, executing:
+1. **Repository Checkout & Setup**: Node.js environment.
+2. **Type Checking & Builds**: Runs `npm run build` across backend and frontend.
+3. **Automated Unit & Integration Tests**: Runs `npm test` across all 111 test suites.
+4. **Remote Quality Gate Integration (Optional)**: Calls `/api/test-runs?failOnErrors=true` using GitHub secret `WEBHOOKGUARD_API_KEY`.
+
+### Model B: Interactive Manual Quality Gate & Remote Dispatch
+The manual quality gate is defined in `.github/workflows/webhookguard-manual-quality-gate.yml` and can be triggered:
+- **Directly from GitHub Actions Web UI**: Under **Actions** → **WebhookGuard Manual Quality Gate** → **Run workflow** (select `master` and input `suite_id`).
+- **From WebhookGuard Console (`/cicd`)**: Two distinct execution modes are provided:
+  1. **`Simulate API Gate`**: Immediate in-browser API evaluation (`POST /api/test-runs?failOnErrors=true`). Tests pass with `HTTP 201 Created` or reject with `HTTP 422 Unprocessable Entity`.
+  2. **`Run GitHub Actions`**: Dispatches a live `workflow_dispatch` event via the backend API (`POST /api/cicd/dispatch`), tracking runner lifecycle states (`Submitting` → `Queued` → `In progress` → `Passed` / `Failed`) with live run links.
+
+#### Quality Gate Endpoint
 ```http
 POST /api/test-runs?failOnErrors=true
 Content-Type: application/json
+X-API-Key: <ADMIN_API_KEY>
 
 {
   "endpointId": "<ENDPOINT_ID>",
@@ -215,24 +232,9 @@ Content-Type: application/json
 - **All Tests Pass**: Returns `HTTP 201 Created` with `{ "success": true, "status": "passed", ... }`.
 - **Any Test Fails**: Returns `HTTP 422 Unprocessable Entity` with `{ "success": false, "status": "failed", "error": "WebhookGuard Quality Gate Failed..." }`.
 
-### GitHub Actions Workflow
-The workflow is located at `.github/workflows/webhookguard-ci.yml`.
-
-It performs:
-1. **Repository Checkout & Setup**: Node.js 22 environment.
-2. **Type Checking & Builds**: Runs `npm run build` on both backend and frontend.
-3. **Automated Unit & Integration Tests**: Runs `npm test` covering HMAC, Mock Receiver, Test Runner, and Quality Gate APIs.
-4. **Local Quality Gate Validation**: Spins up background instance and verifies rejection (`HTTP 422`) on failing suites.
-5. **Remote Quality Gate Integration (Optional)**: If `WEBHOOKGUARD_BASE_URL`, `WEBHOOKGUARD_ENDPOINT_ID`, and `WEBHOOKGUARD_SUITE_ID` are configured in GitHub Actions secrets, it calls the remote quality gate API.
-
-#### Required GitHub Secrets for Remote Deployment
-- `WEBHOOKGUARD_BASE_URL`: Public or reachable WebhookGuard API URL (e.g. `https://api.webhookguard.example.com`).
-- `WEBHOOKGUARD_ENDPOINT_ID`: Target webhook endpoint ID.
-- `WEBHOOKGUARD_SUITE_ID`: Test suite ID to validate prior to release.
-- `WEBHOOKGUARD_API_KEY`: Optional API key if external authentication is enabled.
-
-> [!IMPORTANT]
-> Hosted GitHub Actions runners cannot reach `http://localhost:4000` on your personal machine. For remote quality gates, configure a publicly accessible staging URL or use a self-hosted runner.
+#### Configuration & Secrets
+- **GitHub Repository Secret (`WEBHOOKGUARD_API_KEY`)**: Set under **Settings → Secrets and variables → Actions**. Used by runners to authenticate with the deployed AWS API Gateway.
+- **Backend Environment Variable (`GITHUB_ACTIONS_TOKEN`)**: Set in your backend or AWS Lambda environment with a GitHub Personal Access Token (Fine-Grained or Classic) having `actions:write` scope for `santhosh11225/webhookguard`. Never exposed to frontend bundles.
 
 ---
 
@@ -241,7 +243,7 @@ It performs:
 Execute the complete test suite locally:
 
 ```bash
-# Run all automated tests (HMAC, Mock Receiver, Runner, Quality Gate):
+# Run all 111 automated tests:
 npm test
 
 # Build backend and frontend:
@@ -251,9 +253,12 @@ npm run build
 ### Verified Test Coverage:
 - **HMAC Unit Tests** (`backend/src/tests/hmac.test.ts`): 9/9 passing
 - **Mock Receiver Integration Tests** (`backend/src/tests/mockReceiver.test.ts`): 10/10 passing
-- **Test Runner & Assertion Tests** (`backend/src/tests/testRunner.test.ts`): 6/6 passing
+- **Test Runner & Assertion Tests** (`backend/src/tests/testRunner.test.ts`): 21/21 passing
+- **SSRF Protection & Isolation Tests** (`backend/src/tests/ssrf.test.ts`): 35/35 passing
+- **Authentication Middleware Tests** (`backend/src/tests/auth.test.ts`): 16/16 passing
 - **CI/CD Quality Gate Tests** (`backend/src/tests/qualityGate.test.ts`): 4/4 passing
-- **Total**: 29/29 tests passing
+- **GitHub Actions Integration Tests** (`backend/src/tests/cicd.test.ts`): 10/10 passing
+- **Total**: **111/111 passing tests across 10 suites (0 failures)**
 
 ---
 

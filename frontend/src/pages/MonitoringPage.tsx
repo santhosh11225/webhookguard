@@ -47,6 +47,14 @@ export const MonitoringPage: React.FC = () => {
       ? Math.round((data.failedTests / data.totalTests) * 1000) / 10
       : 0;
 
+  if (loading && !data) {
+    return (
+      <div className="py-16 text-center text-sm text-gray-500">
+        Loading reliability metrics...
+      </div>
+    );
+  }
+
   return (
     <div className="space-y-6">
       {/* Header */}
