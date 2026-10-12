@@ -10,14 +10,14 @@ import {
   Search,
   Key,
 } from 'lucide-react';
-import { api } from '../services/api';
+import { api, API_BASE } from '../services/api';
 import { Endpoint, EndpointCreateInput, AuthType, Environment, HttpMethod } from '../types';
 import { Button } from '../components/common/Button';
 import { Modal } from '../components/common/Modal';
 import { AuthBadge, EnvBadge } from '../components/common/Badge';
 import { useToast } from '../context/ToastContext';
 
-export const DEFAULT_MOCK_PAYMENT_URL = 'http://localhost:4000/api/mock-webhooks/payment';
+export const DEFAULT_MOCK_PAYMENT_URL = `${API_BASE}/mock-webhooks/payment`;
 export const DEFAULT_MOCK_PAYMENT_SECRET = 'whsec_test_98af21d09e023190ab78ff09a1';
 
 export const EndpointsPage: React.FC = () => {

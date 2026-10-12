@@ -60,6 +60,7 @@ export interface TestCase {
   name: string;
   description?: string;
   type: TestCaseType;
+  url?: string;
   method?: HttpMethod;
   headers?: Record<string, string>;
   payload?: any;

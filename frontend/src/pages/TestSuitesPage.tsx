@@ -178,6 +178,7 @@ export const TestSuitesPage: React.FC = () => {
       id: `test-${Date.now()}`,
       name: `Test: ${type.replace(/_/g, ' ').toUpperCase()}`,
       type,
+      url: type === 'ssrf' ? 'http://169.254.169.254/latest/meta-data/' : undefined,
       method: 'POST',
       expectedStatus:
         type === 'timeout'
@@ -193,7 +194,7 @@ export const TestSuitesPage: React.FC = () => {
         type === 'timeout'
           ? { event: 'payment.slow', transaction_id: 'txn_sla_timeout_001', amount: 2500 }
           : type === 'valid'
-          ? { event: 'webhook.ping', id: 'ping_123' }
+          ? { event: 'webhook.ping', id: 'ping_123', transaction_id: 'txn_ping_123', amount: 100 }
           : { event: 'incomplete' },
       timeoutMs: type === 'timeout' ? 2000 : 5000,
       retryCount: type === 'retry' ? 3 : 1,

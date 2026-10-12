@@ -9,10 +9,34 @@ import {
   DashboardAnalytics,
 } from '../types';
 
-const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:4000/api';
+export const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:4000/api';
+
+function getHeaders(extraHeaders: Record<string, string> = {}): Record<string, string> {
+  const headers: Record<string, string> = { ...extraHeaders };
+  if (typeof window !== 'undefined') {
+    const key = localStorage.getItem('webhookguard_api_key');
+    if (key) {
+      headers['X-API-Key'] = key;
+    }
+  }
+  return headers;
+}
 
 async function handleResponse<T>(res: Response): Promise<T> {
   if (!res.ok) {
+    if (res.status === 401 && typeof window !== 'undefined') {
+      const stored = localStorage.getItem('webhookguard_api_key');
+      const entered = window.prompt(
+        stored
+          ? 'Authentication failed: Invalid WebhookGuard Access Key. Please enter the valid Access Key:'
+          : 'Authentication required: Please enter your WebhookGuard Access Key to manage endpoints and runs:'
+      );
+      if (entered && entered.trim()) {
+        localStorage.setItem('webhookguard_api_key', entered.trim());
+        window.location.reload();
+      }
+    }
+
     let errorMsg = `HTTP Error ${res.status}: ${res.statusText}`;
     try {
       const data = await res.json();
@@ -25,87 +49,81 @@ async function handleResponse<T>(res: Response): Promise<T> {
   return (json.data !== undefined ? json.data : json) as T;
 }
 
+async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
+  const url = `${API_BASE}${path}`;
+  const headers = getHeaders((options.headers as Record<string, string>) || {});
+  if (options.body && typeof options.body === 'string' && !headers['Content-Type']) {
+    headers['Content-Type'] = 'application/json';
+  }
+
+  const res = await fetch(url, {
+    ...options,
+    headers,
+  });
+
+  return handleResponse<T>(res);
+}
+
 export const api = {
-  // Health
+  // Health (public)
   async getHealth(): Promise<{ status: string; version: string; demoMode: boolean }> {
-    const res = await fetch(`${API_BASE}/health`);
-    return handleResponse(res);
+    return request('/health');
   },
 
   // Endpoints
   async getEndpoints(): Promise<Endpoint[]> {
-    const res = await fetch(`${API_BASE}/endpoints`);
-    return handleResponse<Endpoint[]>(res);
+    return request<Endpoint[]>('/endpoints');
   },
 
   async getEndpoint(id: string): Promise<Endpoint> {
-    const res = await fetch(`${API_BASE}/endpoints/${id}`);
-    return handleResponse<Endpoint>(res);
+    return request<Endpoint>(`/endpoints/${id}`);
   },
 
   async createEndpoint(data: EndpointCreateInput): Promise<Endpoint> {
-    const res = await fetch(`${API_BASE}/endpoints`, {
+    return request<Endpoint>('/endpoints', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(data),
     });
-    return handleResponse<Endpoint>(res);
   },
 
   async updateEndpoint(id: string, data: Partial<EndpointCreateInput>): Promise<Endpoint> {
-    const res = await fetch(`${API_BASE}/endpoints/${id}`, {
+    return request<Endpoint>(`/endpoints/${id}`, {
       method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(data),
     });
-    return handleResponse<Endpoint>(res);
   },
 
   async deleteEndpoint(id: string): Promise<boolean> {
-    const res = await fetch(`${API_BASE}/endpoints/${id}`, {
-      method: 'DELETE',
-    });
-    await handleResponse(res);
+    await request(`/endpoints/${id}`, { method: 'DELETE' });
     return true;
   },
 
   // Test Suites
   async getTestSuites(endpointId?: string): Promise<TestSuite[]> {
-    const url = endpointId
-      ? `${API_BASE}/test-suites?endpointId=${encodeURIComponent(endpointId)}`
-      : `${API_BASE}/test-suites`;
-    const res = await fetch(url);
-    return handleResponse<TestSuite[]>(res);
+    const query = endpointId ? `?endpointId=${encodeURIComponent(endpointId)}` : '';
+    return request<TestSuite[]>(`/test-suites${query}`);
   },
 
   async getTestSuite(id: string): Promise<TestSuite> {
-    const res = await fetch(`${API_BASE}/test-suites/${id}`);
-    return handleResponse<TestSuite>(res);
+    return request<TestSuite>(`/test-suites/${id}`);
   },
 
   async createTestSuite(data: TestSuiteCreateInput): Promise<TestSuite> {
-    const res = await fetch(`${API_BASE}/test-suites`, {
+    return request<TestSuite>('/test-suites', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(data),
     });
-    return handleResponse<TestSuite>(res);
   },
 
   async updateTestSuite(id: string, data: Partial<TestSuiteCreateInput>): Promise<TestSuite> {
-    const res = await fetch(`${API_BASE}/test-suites/${id}`, {
+    return request<TestSuite>(`/test-suites/${id}`, {
       method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(data),
     });
-    return handleResponse<TestSuite>(res);
   },
 
   async deleteTestSuite(id: string): Promise<boolean> {
-    const res = await fetch(`${API_BASE}/test-suites/${id}`, {
-      method: 'DELETE',
-    });
-    await handleResponse(res);
+    await request(`/test-suites/${id}`, { method: 'DELETE' });
     return true;
   },
 
@@ -117,12 +135,10 @@ export const api = {
     failOnErrors = false
   ): Promise<{ runId: string; status: string; total: number; passed: number; failed: number }> {
     const query = failOnErrors ? '?failOnErrors=true' : '';
-    const res = await fetch(`${API_BASE}/test-runs${query}`, {
+    return request(`/test-runs${query}`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ endpointId, suiteId, trigger }),
     });
-    return handleResponse(res);
   },
 
   async getTestRuns(params?: { endpointId?: string; suiteId?: string; limit?: number }): Promise<TestRun[]> {
@@ -132,41 +148,34 @@ export const api = {
     if (params?.limit) sp.set('limit', params.limit.toString());
 
     const qs = sp.toString() ? `?${sp.toString()}` : '';
-    const res = await fetch(`${API_BASE}/test-runs${qs}`);
-    return handleResponse<TestRun[]>(res);
+    return request<TestRun[]>(`/test-runs${qs}`);
   },
 
   async getTestRun(id: string): Promise<TestRun> {
-    const res = await fetch(`${API_BASE}/test-runs/${id}`);
-    return handleResponse<TestRun>(res);
+    return request<TestRun>(`/test-runs/${id}`);
   },
 
   // Test Results
   async getTestResults(runId: string): Promise<TestResult[]> {
-    const res = await fetch(`${API_BASE}/test-results/${runId}`);
-    return handleResponse<TestResult[]>(res);
+    return request<TestResult[]>(`/test-results/${runId}`);
   },
 
   async getTestResultDetail(id: string): Promise<TestResult> {
-    const res = await fetch(`${API_BASE}/test-results/detail/${id}`);
-    return handleResponse<TestResult>(res);
+    return request<TestResult>(`/test-results/detail/${id}`);
   },
 
   // Reports
   async getReport(runId: string): Promise<ReportSummary> {
-    const res = await fetch(`${API_BASE}/reports/${runId}`);
-    return handleResponse<ReportSummary>(res);
+    return request<ReportSummary>(`/reports/${runId}`);
   },
 
   // Analytics
   async getDashboardAnalytics(): Promise<DashboardAnalytics> {
-    const res = await fetch(`${API_BASE}/analytics/dashboard`);
-    return handleResponse<DashboardAnalytics>(res);
+    return request<DashboardAnalytics>('/analytics/dashboard');
   },
 
   // Seed Data Trigger
   async seedDatabase(): Promise<{ success: boolean; message: string }> {
-    const res = await fetch(`${API_BASE}/seed`, { method: 'POST' });
-    return handleResponse(res);
+    return request('/seed', { method: 'POST' });
   },
 };

@@ -1,7 +1,7 @@
 import { DynamoDBClient } from '@aws-sdk/client-dynamodb';
 import { DynamoDBDocumentClient } from '@aws-sdk/lib-dynamodb';
 
-const region = process.env.AWS_REGION || process.env.AWS_DEFAULT_REGION || 'ap-south-2';
+const region = process.env.AWS_REGION || process.env.AWS_DEFAULT_REGION || 'ap-south-1';
 
 const rawClient = new DynamoDBClient({ region });
 

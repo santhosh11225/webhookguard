@@ -13,7 +13,7 @@ export async function seedDatabase(
   port = 4000
 ): Promise<void> {
   const count = await endpointRepo.count();
-  const apiGateway = process.env.API_GATEWAY_URL || (process.env.AWS_LAMBDA_FUNCTION_NAME ? 'https://sqh1tjb8oj.execute-api.ap-south-2.amazonaws.com' : '');
+  const apiGateway = process.env.API_GATEWAY_URL ? process.env.API_GATEWAY_URL.replace(/\/+$/, '') : '';
   const baseUrl = apiGateway ? `${apiGateway}/api/mock-webhooks` : `http://localhost:${port}/api/mock-webhooks`;
 
   if (count > 0) {

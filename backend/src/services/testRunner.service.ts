@@ -14,25 +14,31 @@ import {
 } from '../models/types.js';
 import { generateHmacSha256 } from '../utils/hmac.js';
 import { SqliteEndpointRepository } from '../repositories/sqlite/endpoint.repository.js';
+import {
+  SsrfBlockedError,
+  validateTargetUrl,
+  type SsrfValidationOptions,
+} from '../utils/ssrfValidator.js';
 
-export class SsrfBlockedError extends Error {
-  readonly isSsrfBlocked = true;
-  readonly blockedHostname: string;
-
-  constructor(hostname: string) {
-    super(`SSRF Protection: Access to cloud instance metadata (${hostname}) is strictly prohibited.`);
-    this.name = 'SsrfBlockedError';
-    this.blockedHostname = hostname;
-  }
-}
+export { SsrfBlockedError, type SsrfValidationOptions };
 
 export class TestRunnerService {
+  private options: SsrfValidationOptions;
+
   constructor(
     private endpointRepo: IEndpointRepository,
     private suiteRepo: ITestSuiteRepository,
     private runRepo: ITestRunRepository,
-    private resultRepo: ITestResultRepository
-  ) {}
+    private resultRepo: ITestResultRepository,
+    options?: SsrfValidationOptions
+  ) {
+    this.options = {
+      allowLocalNetworks:
+        options?.allowLocalNetworks ??
+        (process.env.ALLOW_LOCAL_NETWORKS === 'true' ||
+          (process.env.NODE_ENV !== 'production' && !process.env.AWS_LAMBDA_FUNCTION_NAME)),
+    };
+  }
 
   /**
    * Execute a test suite against an endpoint with real HTTP requests
@@ -141,6 +147,7 @@ export class TestRunnerService {
     endpoint: Endpoint,
     test: TestCase
   ): Promise<TestResult> {
+    const targetUrl = test.url || endpoint.url;
     const method = test.method || endpoint.method || 'POST';
     const maxAttempts = Math.max(1, test.retryCount || 1);
     const retryDelay = test.retryDelayMs || 500;
@@ -168,7 +175,7 @@ export class TestRunnerService {
 
       try {
         const responseData = await this.sendHttpRequest(
-          endpoint.url,
+          targetUrl,
           method,
           headers,
           bodyString,
@@ -183,12 +190,12 @@ export class TestRunnerService {
         if (expectsSsrfBlock) {
           // Expected SSRF pre-flight block, but request proceeded to network and received a response!
           finalStatus = 'SECURITY FAILURE';
-          lastError = `Security Violation: Prohibited destination (${endpoint.url}) was accessed over the network instead of being blocked pre-flight. Received HTTP ${responseData.status}.`;
+          lastError = `Security Violation: Prohibited destination (${targetUrl}) was accessed over the network instead of being blocked pre-flight. Received HTTP ${responseData.status}.`;
           securityDetails = {
             issue: 'SSRF protection failed: Request to restricted cloud metadata endpoint was permitted.',
             severity: 'critical',
             expectedBehavior: 'Requests to cloud instance metadata (169.254.169.254) must be blocked pre-flight before opening any network connection.',
-            observedBehavior: `Request proceeded to network and received HTTP ${responseData.status} from ${endpoint.url}.`,
+            observedBehavior: `Request proceeded to network and received HTTP ${responseData.status} from ${targetUrl}.`,
             remediation:
               'Ensure URL validation occurs before socket creation and strictly blocks link-local / cloud metadata IP addresses.',
           };
@@ -361,7 +368,7 @@ export class TestRunnerService {
       responseTime: totalElapsed,
       error: lastError,
       request: {
-        url: endpoint.url,
+        url: targetUrl,
         method,
         headers: safeHeaders,
         body: test.payload,
@@ -381,35 +388,6 @@ export class TestRunnerService {
     });
   }
 
-  /**
-   * Validate outbound URL against SSRF and cloud metadata access
-   */
-  private validateTargetUrl(rawUrl: string): void {
-    let parsed: URL;
-    try {
-      parsed = new URL(rawUrl);
-    } catch {
-      throw new Error(`Invalid target URL: "${rawUrl}"`);
-    }
-
-    if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
-      throw new Error(`Unsupported protocol "${parsed.protocol}". Only HTTP and HTTPS are permitted.`);
-    }
-
-    const hostname = parsed.hostname.toLowerCase();
-
-    // Cloud metadata protection (AWS IMDS, GCP, Azure, OpenStack, Alibaba)
-    const isCloudMetadata =
-      hostname === '169.254.169.254' ||
-      hostname.startsWith('169.254.') ||
-      hostname === 'metadata.google.internal' ||
-      hostname === 'metadata.internal' ||
-      hostname === '100.100.100.200';
-
-    if (isCloudMetadata) {
-      throw new SsrfBlockedError(hostname);
-    }
-  }
 
   /**
    * Helper to serialize payload and attach authentication headers
@@ -484,7 +462,7 @@ export class TestRunnerService {
   }
 
   /**
-   * Perform actual HTTP request with strict timeout abort controller covering full response body
+   * Perform actual HTTP request with pre-flight SSRF validation and manual redirect protection
    */
   private async sendHttpRequest(
     url: string,
@@ -493,7 +471,8 @@ export class TestRunnerService {
     body: string | undefined,
     timeoutMs: number
   ): Promise<{ status: number; statusText: string; headers: Record<string, string>; body: any }> {
-    this.validateTargetUrl(url);
+    // Stage 1 & 2: Pre-flight validation (URL format, IP literal check, and DNS resolution check)
+    await validateTargetUrl(url, this.options);
 
     // Limit maximum timeout to reasonable bounds (max 30 seconds)
     const effectiveTimeoutMs = Math.min(Math.max(timeoutMs, 500), 30000);
@@ -504,46 +483,86 @@ export class TestRunnerService {
     }, effectiveTimeoutMs);
 
     try {
-      const options: RequestInit = {
-        method,
-        headers,
-        signal: controller.signal,
-        redirect: 'follow',
-      };
+      let currentUrl = url;
+      let currentMethod = method;
+      let currentBody = body;
+      let redirectCount = 0;
+      const maxRedirects = 5;
 
-      if (body !== undefined && method !== 'GET' && method !== 'HEAD') {
-        options.body = body;
+      while (true) {
+        // Validate URL before every network hop (covers initial request AND redirects)
+        await validateTargetUrl(currentUrl, this.options);
+
+        const options: RequestInit = {
+          method: currentMethod,
+          headers,
+          signal: controller.signal,
+          redirect: 'manual', // Strictly intercept redirects to prevent automatic outbound requests to blocked targets
+        };
+
+        if (currentBody !== undefined && currentMethod !== 'GET' && currentMethod !== 'HEAD') {
+          options.body = currentBody;
+        }
+
+        const res = await fetch(currentUrl, options);
+
+        // Check if response is an HTTP redirect
+        const isRedirect = [301, 302, 303, 307, 308].includes(res.status);
+        if (isRedirect) {
+          const location = res.headers.get('location');
+          if (!location) {
+            return await this.buildResponseObject(res);
+          }
+
+          if (redirectCount >= maxRedirects) {
+            throw new Error(`Maximum redirect limit (${maxRedirects}) exceeded`);
+          }
+          redirectCount++;
+
+          const nextUrl = new URL(location, currentUrl).href;
+
+          // Strictly validate redirect target pre-flight BEFORE making any network call
+          await validateTargetUrl(nextUrl, this.options);
+
+          currentUrl = nextUrl;
+          if (res.status === 303 || ((res.status === 301 || res.status === 302) && currentMethod === 'POST')) {
+            currentMethod = 'GET';
+            currentBody = undefined;
+          }
+          continue;
+        }
+
+        return await this.buildResponseObject(res);
       }
-
-      const res = await fetch(url, options);
-
-      // Verify that any followed redirect did not lead to cloud metadata
-      if (res.url && res.url !== url) {
-        this.validateTargetUrl(res.url);
-      }
-
-      const responseHeaders: Record<string, string> = {};
-      res.headers.forEach((val, key) => {
-        responseHeaders[key] = val;
-      });
-
-      // Response body consumption is strictly protected by the same timeout controller
-      let parsedBody: any = null;
-      const text = await res.text();
-      try {
-        parsedBody = JSON.parse(text);
-      } catch {
-        parsedBody = text.slice(0, 1000); // Truncate non-json safely
-      }
-
-      return {
-        status: res.status,
-        statusText: res.statusText,
-        headers: responseHeaders,
-        body: parsedBody,
-      };
     } finally {
       clearTimeout(timeoutId);
     }
+  }
+
+  private async buildResponseObject(res: Response): Promise<{
+    status: number;
+    statusText: string;
+    headers: Record<string, string>;
+    body: any;
+  }> {
+    const responseHeaders: Record<string, string> = {};
+    res.headers.forEach((val, key) => {
+      responseHeaders[key] = val;
+    });
+
+    let parsedBody: any = null;
+    const text = await res.text();
+    try {
+      parsedBody = JSON.parse(text);
+    } catch {
+      parsedBody = text.slice(0, 1000); // Truncate non-json safely
+    }
+
+    return {
+      status: res.status,
+      statusText: res.statusText,
+      headers: responseHeaders,
+      body: parsedBody,
+    };
   }
 }

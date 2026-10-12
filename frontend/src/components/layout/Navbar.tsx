@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useLocation, Link } from 'react-router-dom';
 import { Zap, Terminal } from 'lucide-react';
-import { api } from '../../services/api';
+import { api, API_BASE } from '../../services/api';
 import { Button } from '../common/Button';
 
 export const Navbar: React.FC = () => {
@@ -33,9 +33,9 @@ export const Navbar: React.FC = () => {
           {getPageTitle(location.pathname)}
         </h1>
         <span className="hidden sm:inline-block text-xs font-mono text-gray-300">|</span>
-        <span className="hidden sm:inline-flex items-center gap-1.5 px-2 py-0.5 rounded text-[11px] font-mono bg-gray-50 text-gray-600 border border-gray-200">
-          <Terminal className="w-3 h-3 text-blue-600" />
-          http://localhost:4000/api
+        <span className="hidden sm:inline-flex items-center gap-1.5 px-2 py-0.5 rounded text-[11px] font-mono bg-gray-50 text-gray-600 border border-gray-200 max-w-xs truncate" title={API_BASE}>
+          <Terminal className="w-3 h-3 text-blue-600 flex-shrink-0" />
+          <span className="truncate">{API_BASE}</span>
         </span>
       </div>
 

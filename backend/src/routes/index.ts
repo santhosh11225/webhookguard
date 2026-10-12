@@ -38,6 +38,7 @@ import { createAnalyticsRoutes } from './analytics.routes.js';
 import { createHealthRoutes } from './health.routes.js';
 import { createMockReceiverRoutes } from './mockReceiver.routes.js';
 import { seedDatabase } from '../utils/seedData.js';
+import { requireAdminAuth } from '../middleware/auth.js';
 
 export function createApiRouter(): Router {
   const router = Router();
@@ -82,18 +83,21 @@ export function createApiRouter(): Router {
   const healthController = new HealthController();
   const mockReceiverController = new MockReceiverController();
 
+
   // Mount Routes
   router.use('/health', createHealthRoutes(healthController));
-  router.use('/endpoints', createEndpointRoutes(endpointController));
-  router.use('/test-suites', createTestSuiteRoutes(suiteController));
-  router.use('/test-runs', createTestRunRoutes(runController));
-  router.use('/test-results', createTestResultRoutes(resultController));
-  router.use('/reports', createReportRoutes(reportController));
-  router.use('/analytics', createAnalyticsRoutes(analyticsController));
   router.use('/mock-webhooks', createMockReceiverRoutes(mockReceiverController));
 
-  // Seed endpoint for manual or frontend trigger
-  router.post('/seed', async (req, res, next) => {
+  // Protected Management Routes
+  router.use('/endpoints', requireAdminAuth, createEndpointRoutes(endpointController));
+  router.use('/test-suites', requireAdminAuth, createTestSuiteRoutes(suiteController));
+  router.use('/test-runs', requireAdminAuth, createTestRunRoutes(runController));
+  router.use('/test-results', requireAdminAuth, createTestResultRoutes(resultController));
+  router.use('/reports', requireAdminAuth, createReportRoutes(reportController));
+  router.use('/analytics', requireAdminAuth, createAnalyticsRoutes(analyticsController));
+
+  // Seed endpoint for manual or frontend trigger (protected)
+  router.post('/seed', requireAdminAuth, async (req, res, next) => {
     try {
       const port = parseInt(process.env.PORT || '4000', 10);
       await seedDatabase(endpointRepo, suiteRepo, runRepo, resultRepo, port);

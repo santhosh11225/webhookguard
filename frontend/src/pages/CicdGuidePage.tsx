@@ -4,7 +4,7 @@ import {
   Terminal,
   Play,
 } from 'lucide-react';
-import { api } from '../services/api';
+import { api, API_BASE } from '../services/api';
 import { Endpoint, TestSuite } from '../types';
 import { Button } from '../components/common/Button';
 import { CodeViewer } from '../components/common/CodeViewer';
@@ -80,7 +80,7 @@ jobs:
         run: |
           echo "Executing automated webhook validation..."
           RESPONSE=$(curl -s -w "\\n%{http_code}" -X POST \\
-            "http://localhost:4000/api/test-runs?failOnErrors=true" \\
+            "${API_BASE}/test-runs?failOnErrors=true" \\
             -H "Content-Type: application/json" \\
             -d '{
               "endpointId": "${selectedEndpointId || 'YOUR_ENDPOINT_ID'}",
@@ -222,7 +222,7 @@ jobs:
         <div className="bg-white border border-gray-200 p-5 rounded-lg space-y-3">
           <h4 className="text-sm font-semibold text-[#333333]">Trigger Test Suite via cURL</h4>
           <CodeViewer
-            code={`curl -X POST http://localhost:4000/api/test-runs \\
+            code={`curl -X POST ${API_BASE}/test-runs \\
   -H "Content-Type: application/json" \\
   -d '{
     "endpointId": "${selectedEndpointId || 'endpoint_id'}",
@@ -237,7 +237,7 @@ jobs:
         <div className="bg-white border border-gray-200 p-5 rounded-lg space-y-3">
           <h4 className="text-sm font-semibold text-[#333333]">Query Test Run Status</h4>
           <CodeViewer
-            code={`curl http://localhost:4000/api/test-runs/run_sample_id \\
+            code={`curl ${API_BASE}/test-runs/run_sample_id \\
   -H "Accept: application/json"`}
             language="bash"
             maxHeight="max-h-36"

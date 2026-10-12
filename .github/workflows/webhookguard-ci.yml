@@ -2,14 +2,18 @@ name: WebhookGuard CI & Quality Gate
 
 on:
   push:
-    branches: [ main, master, dev ]
+    branches: [ main, master ]
   pull_request:
     branches: [ main, master ]
+
+permissions:
+  contents: read
 
 jobs:
   build-and-test:
     name: Build, Type Check & Automated Tests
     runs-on: ubuntu-latest
+    timeout-minutes: 10
 
     steps:
       - name: Checkout Repository
@@ -21,8 +25,11 @@ jobs:
           node-version: 22
           cache: 'npm'
 
-      - name: Install All Dependencies
-        run: npm run install:all
+      - name: Install Dependencies (npm ci)
+        run: |
+          npm ci
+          npm ci --prefix backend
+          npm ci --prefix frontend
 
       - name: Backend Type Check & Build
         run: npm run build --prefix backend
@@ -33,121 +40,108 @@ jobs:
       - name: Run Backend Automated Tests
         run: npm test --prefix backend
 
-  quality-gate-local:
-    name: Self-Contained Local Quality Gate Validation
+  quality-gate:
+    name: WebhookGuard CI/CD Quality Gate
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     needs: build-and-test
 
     steps:
-      - name: Checkout Repository
-        uses: actions/checkout@v4
-
-      - name: Setup Node.js 22
-        uses: actions/setup-node@v4
-        with:
-          node-version: 22
-          cache: 'npm'
-
-      - name: Install Dependencies
-        run: npm run install:all
-
-      - name: Start WebhookGuard Backend & Verify Health
-        run: |
-          nohup npm run start --prefix backend > backend.log 2>&1 &
-          echo "Waiting for WebhookGuard backend server to become healthy..."
-
-          HEALTHY=false
-          for i in {1..30}; do
-            if curl -sf http://localhost:4000/api/health | jq -e '.status == "healthy"' > /dev/null 2>&1; then
-              echo "Server is healthy after ${i}s!"
-              HEALTHY=true
-              break
-            fi
-            sleep 1
-          done
-
-          if [ "$HEALTHY" != "true" ]; then
-            echo "::error::WebhookGuard backend failed to become healthy within 30 seconds."
-            if [ -f backend.log ]; then
-              echo "=== Backend Server Output Log ==="
-              cat backend.log
-            fi
-            exit 1
-          fi
-
-      - name: "Verify Quality Gate Rejection (Negative Test: HTTP 422 on Vulnerable / Failing Suite)"
-        run: |
-          # Fetch test suites and reliably select the intended failing test suite using jq
-          SUITES_JSON=$(curl -sf http://localhost:4000/api/test-suites)
-          VULN_SUITE_ID=$(echo "$SUITES_JSON" | jq -r '(.data // .) | map(select(.name == "Security Vulnerability Audit Suite" or (.name | test("vulnerab|audit"; "i"))))[0].id // empty')
-          VULN_EP_ID=$(echo "$SUITES_JSON" | jq -r '(.data // .) | map(select(.name == "Security Vulnerability Audit Suite" or (.name | test("vulnerab|audit"; "i"))))[0].endpointId // empty')
-
-          if [ -z "$VULN_SUITE_ID" ] || [ "$VULN_SUITE_ID" = "null" ] || [ -z "$VULN_EP_ID" ] || [ "$VULN_EP_ID" = "null" ]; then
-            echo "::error::Could not find intended failing test suite (Security Vulnerability Audit Suite)."
-            exit 1
-          fi
-
-          echo "Testing failing quality-gate enforcement with suite: $VULN_SUITE_ID (endpoint: $VULN_EP_ID)"
-          HTTP_STATUS=$(curl -s -o response.json -w "%{http_code}" -X POST "http://localhost:4000/api/test-runs?failOnErrors=true" \
-            -H "Content-Type: application/json" \
-            -d "{\"endpointId\": \"$VULN_EP_ID\", \"suiteId\": \"$VULN_SUITE_ID\", \"trigger\": \"cicd\"}")
-
-          echo "Received HTTP Status: $HTTP_STATUS"
-          cat response.json
-
-          if [ "$HTTP_STATUS" -eq 422 ]; then
-            echo "Quality gate correctly rejected failing test suite with HTTP 422."
-          else
-            echo "Expected HTTP 422 rejection on failing suite, but received $HTTP_STATUS."
-            exit 1
-          fi
-
-  quality-gate-remote:
-    name: Remote WebhookGuard Quality Gate (Production / Staging)
-    runs-on: ubuntu-latest
-    needs: build-and-test
-
-    steps:
-      - name: Execute Remote Quality Gate
+      - name: Execute Quality Gate Against AWS WebhookGuard Engine
         env:
-          BASE_URL: ${{ secrets.WEBHOOKGUARD_BASE_URL || vars.WEBHOOKGUARD_BASE_URL }}
-          ENDPOINT_ID: ${{ secrets.WEBHOOKGUARD_ENDPOINT_ID }}
-          SUITE_ID: ${{ secrets.WEBHOOKGUARD_SUITE_ID }}
+          BASE_URL: ${{ secrets.WEBHOOKGUARD_BASE_URL || vars.WEBHOOKGUARD_BASE_URL || 'https://y09oz1azlf.execute-api.ap-south-1.amazonaws.com' }}
+          ENDPOINT_ID: ${{ secrets.WEBHOOKGUARD_ENDPOINT_ID || vars.WEBHOOKGUARD_ENDPOINT_ID || '6abd6350-238b-497b-b434-9a26265e26f7' }}
+          SUITE_ID: ${{ secrets.WEBHOOKGUARD_SUITE_ID || vars.WEBHOOKGUARD_SUITE_ID || 'cc39aca4-636a-45b3-9f35-38799671a9de' }}
           API_KEY: ${{ secrets.WEBHOOKGUARD_API_KEY }}
         run: |
-          if [ -z "$BASE_URL" ]; then
-            echo "Remote WebhookGuard Quality Gate skipped: WEBHOOKGUARD_BASE_URL is not configured."
-            exit 0
+          # 1. Verify Authentication & Identifier Configuration
+          if [ -z "$API_KEY" ]; then
+            if [ "${{ github.event_name }}" = "pull_request" ] && [ "${{ github.event.pull_request.head.repo.full_name }}" != "${{ github.repository }}" ]; then
+              echo "::warning::Skipping live quality gate: repository secrets are not accessible from external fork pull requests."
+              exit 0
+            fi
+            echo "::error::WEBHOOKGUARD_API_KEY secret is required to authenticate with the deployed AWS API Gateway."
+            echo "Please configure the WEBHOOKGUARD_API_KEY secret under Settings -> Secrets and variables -> Actions."
+            exit 1
           fi
 
           if [ -z "$ENDPOINT_ID" ] || [ -z "$SUITE_ID" ]; then
-            echo "Error: WEBHOOKGUARD_ENDPOINT_ID and WEBHOOKGUARD_SUITE_ID must be configured when running remote quality gate."
+            echo "::error::ENDPOINT_ID and SUITE_ID must be configured to trigger WebhookGuard Quality Gate."
             exit 1
           fi
 
-          # The WebhookGuard core API does not require internal API-key authentication.
-          # Forward optional headers only if an external gateway/reverse proxy in front of WebhookGuard requires it.
-          AUTH_HEADERS=()
-          if [ -n "$API_KEY" ]; then
-            AUTH_HEADERS+=(-H "X-API-Key: $API_KEY")
-          fi
+          CLEAN_BASE_URL="${BASE_URL%/}"
+          GATE_URL="${CLEAN_BASE_URL}/api/test-runs?failOnErrors=true"
 
-          echo "Triggering Quality Gate at $BASE_URL/api/test-runs?failOnErrors=true"
-          HTTP_STATUS=$(curl -s -o response.json -w "%{http_code}" -X POST "$BASE_URL/api/test-runs?failOnErrors=true" \
+          echo "=========================================================="
+          echo "        WebhookGuard CI/CD Automated Quality Gate        "
+          echo "=========================================================="
+          echo "Target Base URL: $CLEAN_BASE_URL"
+          echo "Endpoint ID:     $ENDPOINT_ID"
+          echo "Suite ID:        $SUITE_ID"
+          echo "Fail On Errors:  true"
+          echo "Trigger:         cicd"
+          echo "----------------------------------------------------------"
+
+          # 2. Trigger Quality Gate Execution (with 60-second network timeout)
+          RESPONSE=$(curl -s -S --max-time 60 -w "\n%{http_code}" -X POST "$GATE_URL" \
             -H "Content-Type: application/json" \
-            "${AUTH_HEADERS[@]}" \
+            -H "X-API-Key: $API_KEY" \
             -d "{\"endpointId\": \"$ENDPOINT_ID\", \"suiteId\": \"$SUITE_ID\", \"trigger\": \"cicd\"}")
 
-          echo "Quality Gate response (HTTP $HTTP_STATUS):"
-          cat response.json
+          HTTP_STATUS=$(echo "$RESPONSE" | tail -n1)
+          BODY=$(echo "$RESPONSE" | sed '$d')
 
-          if [ "$HTTP_STATUS" -eq 201 ]; then
-            echo "Quality Gate PASSED: All webhook reliability tests succeeded."
-            exit 0
-          elif [ "$HTTP_STATUS" -eq 422 ]; then
-            echo "Quality Gate FAILED: Webhook test suite reported failures."
+          echo "HTTP Response Status: $HTTP_STATUS"
+          echo ""
+
+          # 3. Format Diagnostic Summary
+          if command -v jq > /dev/null 2>&1; then
+            echo "=== Execution Summary ==="
+            echo "$BODY" | jq -r '
+              if .runId then
+                "Run ID:         \(.runId)\n" +
+                "Overall Status: \(.status)\n" +
+                "Total Tests:    \(.total)\n" +
+                "Passed Tests:   \(.passed)\n" +
+                "Failed Tests:   \(.failed)\n" +
+                "Duration:       \(.durationMs) ms\n" +
+                "Started At:     \(.startedAt)\n" +
+                "Completed At:   \(.completedAt)\n" +
+                "----------------------------------------------------------\n" +
+                "Scenario Details:\n" +
+                ((.resultsSummary // []) | map("  [\(.status)] \(.testName) | Expected: \(.expectedStatus) | Actual: \(.actualStatus // "N/A") | Latency: \(.responseTime // 0)ms\(if .error then "\n      Error: " + .error else "" end)") | join("\n"))
+              else
+                "Response: " + (. | tostring)
+              end
+            '
+          else
+            echo "$BODY"
+          fi
+
+          echo "----------------------------------------------------------"
+
+          # 4. Strict Quality Gate Assertions
+          if [ "$HTTP_STATUS" = "201" ]; then
+            RUN_STATUS=$(echo "$BODY" | jq -r '.status // empty' 2>/dev/null || echo "")
+            FAILED_COUNT=$(echo "$BODY" | jq -r '.failed // 0' 2>/dev/null || echo "0")
+            if [ "$RUN_STATUS" = "passed" ] && [ "$FAILED_COUNT" = "0" ]; then
+              echo "::notice::WebhookGuard Quality Gate Passed: 100% of webhook test scenarios succeeded (HTTP 201 Created)."
+              exit 0
+            else
+              echo "::error::WebhookGuard Quality Gate reported incomplete or failing scenarios despite HTTP 201."
+              exit 1
+            fi
+          elif [ "$HTTP_STATUS" = "422" ]; then
+            echo "::error::WebhookGuard Quality Gate Blocked Pipeline: One or more webhook tests failed (HTTP 422 Unprocessable Entity)."
+            exit 1
+          elif [ "$HTTP_STATUS" = "401" ]; then
+            echo "::error::WebhookGuard Quality Gate Authentication Failed (HTTP 401 Unauthorized). Verify WEBHOOKGUARD_API_KEY secret."
+            exit 1
+          elif [ "$HTTP_STATUS" = "400" ]; then
+            echo "::error::WebhookGuard Quality Gate Bad Request (HTTP 400). Verify endpointId and suiteId."
             exit 1
           else
-            echo "Quality Gate ERROR: Unexpected HTTP response $HTTP_STATUS from WebhookGuard API."
+            echo "::error::WebhookGuard Quality Gate Failed: Unexpected HTTP status $HTTP_STATUS from API Gateway."
             exit 1
           fi

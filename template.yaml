@@ -4,12 +4,17 @@ Description: 'WebhookGuard Serverless Platform - Automated Webhook API Testing &
 Parameters:
   CodeBucket:
     Type: String
-    Default: 'webhookguard-deploy-792207721676-ap-south-2'
+    Default: 'webhookguard-deploy-214654654450-ap-south-1'
     Description: 'S3 bucket containing the packaged Lambda zip'
   CodeKey:
     Type: String
     Default: 'lambda.zip'
     Description: 'S3 key for the packaged Lambda zip'
+  AdminApiKey:
+    Type: String
+    NoEcho: true
+    Default: 'guard_sec_214654_whguard_prod'
+    Description: 'Admin API Key for WebhookGuard management endpoints'
 
 Resources:
   # ==========================================
@@ -162,6 +167,8 @@ Resources:
           SUITES_TABLE: !Ref TestSuitesTable
           RUNS_TABLE: !Ref TestRunsTable
           RESULTS_TABLE: !Ref TestResultsTable
+          API_GATEWAY_URL: !Sub 'https://${HttpApi}.execute-api.${AWS::Region}.amazonaws.com'
+          ADMIN_API_KEY: !Ref AdminApiKey
           AWS_NODEJS_CONNECTION_REUSE_ENABLED: '1'
 
   # ==========================================
@@ -223,20 +230,63 @@ Resources:
       SourceArn: !Sub 'arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${HttpApi}/*/*'
 
   # ==========================================
-  # 5. Frontend S3 Hosting Bucket
+  # 5. Frontend Private S3 + CloudFront (OAC)
   # ==========================================
   FrontendBucket:
     Type: AWS::S3::Bucket
     Properties:
       BucketName: !Sub 'webhookguard-frontend-${AWS::AccountId}-${AWS::Region}'
       PublicAccessBlockConfiguration:
-        BlockPublicAcls: false
-        BlockPublicPolicy: false
-        IgnorePublicAcls: false
-        RestrictPublicBuckets: false
-      WebsiteConfiguration:
-        IndexDocument: index.html
-        ErrorDocument: index.html
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+
+  CloudFrontOriginAccessControl:
+    Type: AWS::CloudFront::OriginAccessControl
+    Properties:
+      OriginAccessControlConfig:
+        Name: WebhookGuard-Frontend-OAC
+        OriginAccessControlOriginType: s3
+        SigningBehavior: always
+        SigningProtocol: sigv4
+
+  FrontendDistribution:
+    Type: AWS::CloudFront::Distribution
+    Properties:
+      DistributionConfig:
+        Enabled: true
+        DefaultRootObject: index.html
+        HttpVersion: http2and3
+        Origins:
+          - Id: FrontendS3Origin
+            DomainName: !GetAtt FrontendBucket.RegionalDomainName
+            OriginAccessControlId: !GetAtt CloudFrontOriginAccessControl.Id
+            S3OriginConfig: {}
+        DefaultCacheBehavior:
+          TargetOriginId: FrontendS3Origin
+          ViewerProtocolPolicy: redirect-to-https
+          AllowedMethods:
+            - GET
+            - HEAD
+            - OPTIONS
+          CachedMethods:
+            - GET
+            - HEAD
+          Compress: true
+          ForwardedValues:
+            QueryString: false
+            Cookies:
+              Forward: none
+        CustomErrorResponses:
+          - ErrorCode: 403
+            ResponseCode: 200
+            ResponsePagePath: /index.html
+            ErrorCachingMinTTL: 0
+          - ErrorCode: 404
+            ResponseCode: 200
+            ResponsePagePath: /index.html
+            ErrorCachingMinTTL: 0
 
   FrontendBucketPolicy:
     Type: AWS::S3::BucketPolicy
@@ -245,22 +295,29 @@ Resources:
       PolicyDocument:
         Version: '2012-10-17'
         Statement:
-          - Sid: PublicReadGetObject
+          - Sid: AllowCloudFrontServicePrincipalReadOnly
             Effect: Allow
-            Principal: '*'
+            Principal:
+              Service: cloudfront.amazonaws.com
             Action: s3:GetObject
             Resource: !Sub '${FrontendBucket.Arn}/*'
+            Condition:
+              StringEquals:
+                AWS:SourceArn: !Sub 'arn:aws:cloudfront::${AWS::AccountId}:distribution/${FrontendDistribution}'
 
 Outputs:
   ApiUrl:
     Description: 'HTTP API Gateway Production Endpoint'
     Value: !GetAtt HttpApi.ApiEndpoint
-  FrontendWebsiteUrl:
-    Description: 'S3 Static Website Public URL'
-    Value: !GetAtt FrontendBucket.WebsiteURL
+  FrontendUrl:
+    Description: 'CloudFront HTTPS Production Distribution URL'
+    Value: !Sub 'https://${FrontendDistribution.DomainName}'
   FrontendBucketName:
     Description: 'Frontend S3 Bucket Name'
     Value: !Ref FrontendBucket
+  CloudFrontDistributionId:
+    Description: 'CloudFront Distribution ID'
+    Value: !Ref FrontendDistribution
   LambdaArn:
     Description: 'Backend Lambda Function ARN'
     Value: !GetAtt BackendLambdaFunction.Arn

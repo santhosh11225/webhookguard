@@ -16,12 +16,8 @@ node_modules/
 **/.env.*
 !**/.env.example
 # SQLite local databases and data directory
-backend/data/*.sqlite
-backend/data/*.sqlite-journal
-backend/data/*.sqlite-wal
-backend/data/*.sqlite-shm
-data/*.sqlite
-data/*.sqlite-journal
+backend/data/**
+data/**
 
 # Production and build outputs
 dist/
