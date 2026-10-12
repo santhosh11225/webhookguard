@@ -1,0 +1,278 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: 'WebhookGuard Serverless Platform - Automated Webhook API Testing & Reliability'
+
+Parameters:
+  CodeBucket:
+    Type: String
+    Default: 'webhookguard-deploy-792207721676-ap-south-2'
+    Description: 'S3 bucket containing the packaged Lambda zip'
+  CodeKey:
+    Type: String
+    Default: 'lambda.zip'
+    Description: 'S3 key for the packaged Lambda zip'
+
+Resources:
+  # ==========================================
+  # 1. DynamoDB Tables
+  # ==========================================
+  EndpointsTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: WebhookGuard-Endpoints
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: id
+          AttributeType: S
+      KeySchema:
+        - AttributeName: id
+          KeyType: HASH
+
+  TestSuitesTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: WebhookGuard-TestSuites
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: id
+          AttributeType: S
+        - AttributeName: endpointId
+          AttributeType: S
+      KeySchema:
+        - AttributeName: id
+          KeyType: HASH
+      GlobalSecondaryIndexes:
+        - IndexName: EndpointIndex
+          KeySchema:
+            - AttributeName: endpointId
+              KeyType: HASH
+          Projection:
+            ProjectionType: ALL
+
+  TestRunsTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: WebhookGuard-TestRuns
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: id
+          AttributeType: S
+        - AttributeName: endpointId
+          AttributeType: S
+        - AttributeName: startedAt
+          AttributeType: S
+      KeySchema:
+        - AttributeName: id
+          KeyType: HASH
+      GlobalSecondaryIndexes:
+        - IndexName: EndpointIndex
+          KeySchema:
+            - AttributeName: endpointId
+              KeyType: HASH
+            - AttributeName: startedAt
+              KeyType: RANGE
+          Projection:
+            ProjectionType: ALL
+
+  TestResultsTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: WebhookGuard-TestResults
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: id
+          AttributeType: S
+        - AttributeName: runId
+          AttributeType: S
+        - AttributeName: timestamp
+          AttributeType: S
+      KeySchema:
+        - AttributeName: id
+          KeyType: HASH
+      GlobalSecondaryIndexes:
+        - IndexName: RunIndex
+          KeySchema:
+            - AttributeName: runId
+              KeyType: HASH
+            - AttributeName: timestamp
+              KeyType: RANGE
+          Projection:
+            ProjectionType: ALL
+
+  # ==========================================
+  # 2. IAM Role for Lambda
+  # ==========================================
+  LambdaExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: WebhookGuard-LambdaExecutionRole
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+      Policies:
+        - PolicyName: WebhookGuardDynamoDBAccess
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - dynamodb:GetItem
+                  - dynamodb:PutItem
+                  - dynamodb:UpdateItem
+                  - dynamodb:DeleteItem
+                  - dynamodb:Scan
+                  - dynamodb:Query
+                  - dynamodb:BatchWriteItem
+                  - dynamodb:DescribeTable
+                Resource:
+                  - !GetAtt EndpointsTable.Arn
+                  - !GetAtt TestSuitesTable.Arn
+                  - !GetAtt TestRunsTable.Arn
+                  - !GetAtt TestResultsTable.Arn
+                  - !Sub '${EndpointsTable.Arn}/index/*'
+                  - !Sub '${TestSuitesTable.Arn}/index/*'
+                  - !Sub '${TestRunsTable.Arn}/index/*'
+                  - !Sub '${TestResultsTable.Arn}/index/*'
+
+  # ==========================================
+  # 3. AWS Lambda Function
+  # ==========================================
+  BackendLambdaFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: WebhookGuard-Backend
+      Runtime: nodejs22.x
+      Handler: index.handler
+      Role: !GetAtt LambdaExecutionRole.Arn
+      Code:
+        S3Bucket: !Ref CodeBucket
+        S3Key: !Ref CodeKey
+      MemorySize: 512
+      Timeout: 30
+      Environment:
+        Variables:
+          NODE_ENV: production
+          DB_PROVIDER: dynamodb
+          ENDPOINTS_TABLE: !Ref EndpointsTable
+          SUITES_TABLE: !Ref TestSuitesTable
+          RUNS_TABLE: !Ref TestRunsTable
+          RESULTS_TABLE: !Ref TestResultsTable
+          AWS_NODEJS_CONNECTION_REUSE_ENABLED: '1'
+
+  # ==========================================
+  # 4. Amazon API Gateway (HTTP API v2)
+  # ==========================================
+  HttpApi:
+    Type: AWS::ApiGatewayV2::Api
+    Properties:
+      Name: WebhookGuard-Api
+      ProtocolType: HTTP
+      CorsConfiguration:
+        AllowOrigins:
+          - '*'
+        AllowMethods:
+          - GET
+          - POST
+          - PUT
+          - PATCH
+          - DELETE
+          - OPTIONS
+          - HEAD
+        AllowHeaders:
+          - Content-Type
+          - Authorization
+          - X-Signature
+          - X-API-Key
+          - X-Signature-Header
+          - X-Requested-With
+        MaxAge: 86400
+
+  HttpApiIntegration:
+    Type: AWS::ApiGatewayV2::Integration
+    Properties:
+      ApiId: !Ref HttpApi
+      IntegrationType: AWS_PROXY
+      IntegrationUri: !GetAtt BackendLambdaFunction.Arn
+      PayloadFormatVersion: '2.0'
+
+  HttpApiDefaultRoute:
+    Type: AWS::ApiGatewayV2::Route
+    Properties:
+      ApiId: !Ref HttpApi
+      RouteKey: '$default'
+      Target: !Join ['', ['integrations/', !Ref HttpApiIntegration]]
+
+  HttpApiDefaultStage:
+    Type: AWS::ApiGatewayV2::Stage
+    Properties:
+      ApiId: !Ref HttpApi
+      StageName: '$default'
+      AutoDeploy: true
+
+  LambdaApiPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      Action: lambda:InvokeFunction
+      FunctionName: !GetAtt BackendLambdaFunction.Arn
+      Principal: apigateway.amazonaws.com
+      SourceArn: !Sub 'arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${HttpApi}/*/*'
+
+  # ==========================================
+  # 5. Frontend S3 Hosting Bucket
+  # ==========================================
+  FrontendBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Sub 'webhookguard-frontend-${AWS::AccountId}-${AWS::Region}'
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: false
+        BlockPublicPolicy: false
+        IgnorePublicAcls: false
+        RestrictPublicBuckets: false
+      WebsiteConfiguration:
+        IndexDocument: index.html
+        ErrorDocument: index.html
+
+  FrontendBucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket: !Ref FrontendBucket
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Sid: PublicReadGetObject
+            Effect: Allow
+            Principal: '*'
+            Action: s3:GetObject
+            Resource: !Sub '${FrontendBucket.Arn}/*'
+
+Outputs:
+  ApiUrl:
+    Description: 'HTTP API Gateway Production Endpoint'
+    Value: !GetAtt HttpApi.ApiEndpoint
+  FrontendWebsiteUrl:
+    Description: 'S3 Static Website Public URL'
+    Value: !GetAtt FrontendBucket.WebsiteURL
+  FrontendBucketName:
+    Description: 'Frontend S3 Bucket Name'
+    Value: !Ref FrontendBucket
+  LambdaArn:
+    Description: 'Backend Lambda Function ARN'
+    Value: !GetAtt BackendLambdaFunction.Arn
+  EndpointsTableName:
+    Description: 'DynamoDB Endpoints Table'
+    Value: !Ref EndpointsTable
+  TestSuitesTableName:
+    Description: 'DynamoDB TestSuites Table'
+    Value: !Ref TestSuitesTable
+  TestRunsTableName:
+    Description: 'DynamoDB TestRuns Table'
+    Value: !Ref TestRunsTable
+  TestResultsTableName:
+    Description: 'DynamoDB TestResults Table'
+    Value: !Ref TestResultsTable

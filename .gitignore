@@ -1,0 +1,54 @@
+# Dependencies
+node_modules/
+.pnp
+.pnp.js
+
+# Environment variables
+.env
+.env.local
+.env.*.local
+*.env
+# Environment files and secrets
+.env
+.env.*
+!.env.example
+**/.env
+**/.env.*
+!**/.env.example
+# SQLite local databases and data directory
+backend/data/*.sqlite
+backend/data/*.sqlite-journal
+backend/data/*.sqlite-wal
+backend/data/*.sqlite-shm
+data/*.sqlite
+data/*.sqlite-journal
+
+# Production and build outputs
+dist/
+dist-*/
+build/
+backend/dist/
+backend/dist-lambda/
+frontend/dist/
+
+# Logs
+logs/
+*.log
+npm-debug.log*
+yarn-debug.log*
+pnpm-debug.log*
+
+# Editor and OS
+.vscode/
+!.vscode/extensions.json
+.idea/
+.DS_Store
+Thumbs.db
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+
+# Scratch & temp files
+scratch/
